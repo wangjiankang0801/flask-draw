@@ -6,18 +6,15 @@ from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
-# ===== API 设置（从环境变量读取 Key） =====
+# ===== API 设置 =====
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
     raise RuntimeError("请设置环境变量 API_KEY")
 
-# ImgBB Key 已内置（也可通过环境变量 IMGBB_API_KEY 覆盖）
-IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "0e5ff4046c5c4dafaf88d57f465058eb")
-
 TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to-image"
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
-IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
-# =================================================
+UPLOAD_URL = "https://0x0.st"
+# =====================
 
 HTML_PAGE = """
 <!doctype html>
@@ -123,48 +120,43 @@ toggleMode();
 """
 
 
-def upload_to_imgbb(file):
-    """上传文件到 ImgBB，如果图片过大则自动压缩，返回图片直链"""
-    # 先读取文件内容
+def upload_to_0x0(file):
+    """上传文件到 0x0.st，返回直链"""
     content = file.read()
     file.seek(0)
     original_size = len(content)
 
-    # 如果超过 1MB，使用 PIL 压缩（若无 PIL 则跳过，仍尝试上传原图）
+    # 如果超过 1MB 自动压缩
     if original_size > 1 * 1024 * 1024:
         try:
             from PIL import Image
             from io import BytesIO
             img = Image.open(BytesIO(content))
-            img.thumbnail((1024, 1024))  # 等比缩小到 1024 以内
+            img.thumbnail((1024, 1024))
             buf = BytesIO()
             img.save(buf, format='PNG' if img.mode == 'RGBA' else 'JPEG', quality=85)
             content = buf.getvalue()
             file.filename = file.filename.rsplit('.', 1)[0] + '.jpg'
             print(f"图片已压缩，{original_size/1024:.1f}KB -> {len(content)/1024:.1f}KB")
         except ImportError:
-            print("PIL 未安装，无法压缩，尝试直接上传原图")
+            print("PIL 未安装，上传原图")
 
-    files = {"image": (file.filename, content, file.content_type)}
-    payload = {"key": IMGBB_API_KEY}
-
+    files = {"file": (file.filename, content, file.content_type)}
     try:
-        resp = requests.post(IMGBB_UPLOAD_URL, data=payload, files=files, timeout=60)
-        print(f"ImgBB 响应状态码: {resp.status_code}")
+        resp = requests.post(UPLOAD_URL, files=files, timeout=60)
+        print(f"0x0.st 响应状态码: {resp.status_code}")
         if resp.status_code != 200:
-            print(f"ImgBB 错误响应: {resp.text}")
-
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("success"):
-            url = data["data"]["url"]
-            print(f"ImgBB 上传成功: {url}")
+            print(f"0x0.st 错误响应: {resp.text}")
+            resp.raise_for_status()
+        # 0x0.st 返回的链接在响应正文中，为纯文本（以 \n 结尾）
+        url = resp.text.strip()
+        if url.startswith("http"):
+            print(f"上传成功: {url}")
             return url
         else:
-            print(f"ImgBB 上传失败: {data}")
-            raise Exception(f"ImgBB 上传失败: {data}")
+            raise Exception(f"返回格式异常: {url}")
     except Exception as e:
-        print(f"ImgBB 上传异常: {e}")
+        print(f"0x0.st 上传异常: {e}")
         raise
 
 
@@ -175,7 +167,6 @@ def generate_images(mode, prompt, size, num, image_files):
     }
 
     if mode == "text2image":
-        # ===== 文生图（不变） =====
         url = TEXT2IMAGE_URL
         image_urls = []
         for i in range(num):
@@ -217,20 +208,18 @@ def generate_images(mode, prompt, size, num, image_files):
         return image_urls
 
     else:  # image2image
-        # ===== 图生图：先上传 ImgBB，再用官方格式调用 API =====
         if not image_files:
             raise Exception("请上传至少一张参考图片")
 
-        # 1. 上传所有图片到 ImgBB，获取公开 URL
+        # 上传到 0x0.st 获取链接
         image_url_list = []
         for f in image_files:
             f.seek(0)
-            img_url = upload_to_imgbb(f)
+            img_url = upload_to_0x0(f)
             image_url_list.append(img_url)
 
-        print(f"ImgBB 上传完成，共 {len(image_url_list)} 个链接")
+        print(f"图床上传完成，共 {len(image_url_list)} 个链接")
 
-        # 2. 按官方格式构造请求（注意字段名为 "images"，值为 URL 数组）
         payload = {
             "prompt": prompt,
             "images": image_url_list,
@@ -299,12 +288,11 @@ def index():
 
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
-            # 生成预览（用 base64 显示在页面上）
             for f in image_files:
                 f.seek(0)
                 content = f.read()
                 uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
-                f.seek(0)  # 后面 generate_images 会再次读取
+                f.seek(0)
 
         try:
             image_urls = generate_images(mode, prompt, size, num, image_files)
