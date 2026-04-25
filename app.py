@@ -73,30 +73,40 @@ def generate_images(prompt, size, num):
         "Content-Type": "application/json"
     }
     image_urls = []
-    for _ in range(num):
+    for i in range(num):
         payload = {
             "prompt": prompt,
             "aspect_ratio": "1:1",
             "output_format": "png"
         }
-        response = requests.post(TEXT2IMAGE_URL, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        data = response.json()["data"]
-        get_url = data["urls"]["get"]
+        print(f"尝试生成第 {i+1} 张图片，prompt: {prompt}")
+        try:
+            response = requests.post(TEXT2IMAGE_URL, json=payload, headers=headers, timeout=30)
+            print(f"POST 响应状态码: {response.status_code}")
+            response.raise_for_status()
+            data = response.json()["data"]
+            get_url = data["urls"]["get"]
+            print(f"获取到查询URL: {get_url}")
 
-        # 轮询直到生成完成
-        while True:
-            r = requests.get(get_url, headers=headers)
-            r.raise_for_status()
-            j = r.json()
-            status = j["data"]["status"]
-            print("轮询状态:", status)
-            if status == "completed":
-                image_urls.append(j["data"]["outputs"][0])
-                break
-            elif status == "failed":
-                raise Exception("生成失败")
-            time.sleep(2)
+            # 轮询直到生成完成
+            while True:
+                r = requests.get(get_url, headers=headers)
+                r.raise_for_status()
+                j = r.json()
+                status = j["data"]["status"]
+                print("轮询状态:", status)
+                if status == "completed":
+                    image_url = j["data"]["outputs"][0]
+                    print(f"图片URL: {image_url}")
+                    image_urls.append(image_url)
+                    break
+                elif status == "failed":
+                    print("API 返回生成失败")
+                    raise Exception("生成失败")
+                time.sleep(2)
+        except Exception as e:
+            print(f"生成第 {i+1} 张时出错: {e}")
+            raise  # 重新抛出，让上层捕获后显示在页面
     return image_urls
 
 @app.route('/proxy-image')
@@ -105,8 +115,12 @@ def proxy_image():
     if not url:
         return "缺少url", 400
     headers = {"Authorization": f"Bearer {API_KEY}"}
-    resp = requests.get(url, headers=headers)
-    return resp.content, 200, {'Content-Type': 'image/png'}
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+        return resp.content, 200, {'Content-Type': 'image/png'}
+    except Exception as e:
+        print(f"代理图片失败: {e}")
+        return f"图片加载失败: {e}", 500
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -118,10 +132,12 @@ def index():
         size = request.form.get("size", "512")
         num = int(request.form.get("num", "1"))
         loading = True
+        print(f"收到生成请求: prompt={prompt}, size={size}, num={num}")
         try:
             image_urls = generate_images(prompt, size, num)
         except Exception as e:
             error_msg = f"生成失败: {e}"
+            print(f"最终错误信息: {error_msg}")
     return render_template_string(HTML_PAGE, image_urls=image_urls, error=error_msg, loading=loading)
 
 if __name__ == "__main__":
