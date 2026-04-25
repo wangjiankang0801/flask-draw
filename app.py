@@ -220,6 +220,9 @@ def generate_images(mode, prompt, size, num, image_files):
 
         print(f"catbox 上传完成，共 {len(image_url_list)} 个链接")
 
+        # 修正 size 格式：将 "512" 改为 "512x512"
+        size = f"{size}x{size}"
+
         payload = {
             "prompt": prompt,
             "images": image_url_list,
