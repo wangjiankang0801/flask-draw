@@ -104,6 +104,10 @@ def generate_images(prompt, size, num):
                 if status == "completed":
                     image_url = j["data"]["outputs"][0]
                     print(f"图片URL前100字符: {str(image_url)[:100]}")
+                    # 如果返回的是纯 base64 数据（没有 data: 前缀），补全前缀
+                    if image_url and not image_url.startswith('data:') and not image_url.startswith('http'):
+                        image_url = "data:image/png;base64," + image_url
+                        print("已补全 base64 前缀")
                     image_urls.append(image_url)
                     break
                 elif status == "failed":
