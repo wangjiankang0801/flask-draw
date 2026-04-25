@@ -1,18 +1,22 @@
 import time
 import os
 import base64
-from flask import Flask, request, render_template_string
 import requests
+from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
-# ===== GPTs API 设置（从环境变量读取 Key） =====
+# ===== API 设置（从环境变量读取 Key） =====
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
     raise RuntimeError("请设置环境变量 API_KEY")
 
+# ImgBB Key 已内置（也可通过环境变量覆盖）
+IMGBB_API_KEY = os.environ.get("IMGBB_API_KEY", "0e5ff4046c5c4dafaf88d57f465058eb")
+
 TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to-image"
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
+IMGBB_UPLOAD_URL = "https://api.imgbb.com/1/upload"
 # =================================================
 
 HTML_PAGE = """
@@ -111,13 +115,31 @@ function showModal(src){
 function hideModal(){
     document.getElementById('modal').style.display='none';
 }
-// 初始化默认显示
 toggleMode();
 </script>
 
 </body>
 </html>
 """
+
+
+def upload_to_imgbb(file):
+    """将文件上传到 ImgBB，返回图片直链"""
+    files = {"image": (file.filename, file.read(), file.content_type)}
+    payload = {"key": IMGBB_API_KEY}
+    try:
+        resp = requests.post(IMGBB_UPLOAD_URL, data=payload, files=files, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("success"):
+            url = data["data"]["url"]
+            print(f"ImgBB 上传成功: {url}")
+            return url
+        else:
+            raise Exception(f"ImgBB 上传失败: {data}")
+    except Exception as e:
+        print(f"ImgBB 上传异常: {e}")
+        raise
 
 
 def generate_images(mode, prompt, size, num, image_files):
@@ -127,7 +149,6 @@ def generate_images(mode, prompt, size, num, image_files):
     }
 
     if mode == "text2image":
-        # ===== 文生图（不变） =====
         url = TEXT2IMAGE_URL
         image_urls = []
         for i in range(num):
@@ -169,33 +190,30 @@ def generate_images(mode, prompt, size, num, image_files):
         return image_urls
 
     else:  # image2image
-        # ===== 图生图：改用 data URL 格式 =====
-        url = IMAGE_EDIT_URL
+        if not image_files:
+            raise Exception("请上传至少一张参考图片")
 
-        # 将图片转成 data URL
-        image_data_urls = []
+        # 1. 上传所有图片到 ImgBB，获取公开 URL
+        image_url_list = []
         for f in image_files:
-            content = f.read()
-            b64 = base64.b64encode(content).decode("utf-8")
-            # 构建完整的 Data URL
-            data_url = f"data:image/png;base64,{b64}"
-            image_data_urls.append(data_url)
             f.seek(0)
+            img_url = upload_to_imgbb(f)
+            image_url_list.append(img_url)
 
+        print(f"ImgBB 上传完成，共 {len(image_url_list)} 个链接")
+
+        # 2. 按官方格式构造请求（images 字段为 URL 数组）
         payload = {
             "prompt": prompt,
-            "image": image_data_urls,      # 现在是一个 Data URL 的数组
+            "images": image_url_list,
             "output_format": "png",
             "size": size,
             "num_outputs": num
         }
 
-        print(f"发起图生图请求（Data URL格式），prompt: {prompt}, images: {len(image_data_urls)}张")
-        if image_data_urls:
-            print(f"第一张图片 Data URL 长度: {len(image_data_urls[0])}")
-
+        print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=60)
+            response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
         except Exception as e:
             print(f"图生图 POST 请求失败: {e}")
             raise
@@ -253,11 +271,12 @@ def index():
 
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
-            # 预览参考图
+            # 生成预览（base64 显示在页面）
             for f in image_files:
+                f.seek(0)
                 content = f.read()
                 uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
-                f.seek(0)
+                f.seek(0)  # 后面生成时还会再读
 
         try:
             image_urls = generate_images(mode, prompt, size, num, image_files)
