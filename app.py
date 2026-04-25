@@ -26,15 +26,22 @@ HTML_PAGE = """
   <link rel="icon" href="data:,">
   <style>
     body { font-family: Arial; margin: 20px; }
-    input[type=text], select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
+    /* 适配多行prompt输入框的样式 */
+    input[type=text], textarea, select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
+    /* 隐藏文件选择框的文件名，只保留按钮 */
+    input[type=file] { color: transparent; width: auto; }
+    textarea { resize: vertical; line-height: 1.5; }
     input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    img.thumb { width: 120px; height: 120px; object-fit: cover; margin: 4px; cursor: pointer; border: 1px solid #ccc; }
-    .container { display: flex; flex-wrap: wrap; gap: 10px; }
+    /* 放大缩略图，适配一行5张的尺寸 */
+    img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 4px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
+    /* 调整缩略图容器，增加留白和间距 */
+    .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
     .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; }
     .modal img { max-width:90%; max-height:90%; }
-    #upload_section { display:none; }
+    #upload_section { display:none; margin: 8px 0; }
+    #size_section { display: inline-block; margin-right: 12px; }
   </style>
 </head>
 <body>
@@ -44,11 +51,15 @@ HTML_PAGE = """
   <label>
     <input type="radio" name="mode" value="text2image" checked onchange="toggleMode()"> 文生图
   </label>
-  <label>
+  <label style="margin-left: 12px;">
     <input type="radio" name="mode" value="image2image" onchange="toggleMode()"> 图生图
   </label>
+  <br><br>
+  <!-- 需求1：改成5行高度的多行输入框 -->
+  Prompt: <br>
+  <textarea name="prompt" rows="5" maxlength="200" placeholder="输入你的创意提示" required></textarea>
   <br>
-  Prompt: <input type="text" name="prompt" maxlength="200" placeholder="输入你的创意提示" required><br>
+  <!-- 需求2：尺寸选择框全程保留，两个模式都可见 -->
   <div id="size_section">
     尺寸: 
     <select name="size">
@@ -66,13 +77,17 @@ HTML_PAGE = """
   <div id="upload_section">
     上传参考图片（可多张）: <input type="file" name="image_files" accept="image/*" multiple><br>
   </div>
+  <br>
   <input type="submit" value="生成图片">
 </form>
 
+<!-- 以下三个区块由后端动态填充 -->
+<!-- 1. 加载提示 -->
 {% if loading %}
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
+<!-- 2. 参考图片缩略图（图生图模式） -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -82,6 +97,7 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
+<!-- 3. 生成结果缩略图 -->
 {% if image_urls %}
   <h3>生成结果:</h3>
   <div class="container">
@@ -91,10 +107,12 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
+<!-- 错误提示 -->
 {% if error %}
   <div class="error">{{ error }}</div>
 {% endif %}
 
+<!-- 图片预览弹窗 -->
 <div class="modal" id="modal" onclick="hideModal()">
   <img id="modalImg" src="">
 </div>
@@ -102,8 +120,8 @@ HTML_PAGE = """
 <script>
 function toggleMode() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
+    // 仅控制上传区域显示，尺寸区域全程保留，满足需求2
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
-    document.getElementById('size_section').style.display = (mode === 'text2image') ? 'block' : 'none';
 }
 function showModal(src){
     document.getElementById('modalImg').src = src;
@@ -112,6 +130,7 @@ function showModal(src){
 function hideModal(){
     document.getElementById('modal').style.display='none';
 }
+// 页面初始化时按默认模式设置显示
 toggleMode();
 </script>
 
