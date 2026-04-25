@@ -56,7 +56,13 @@ HTML_PAGE = """
 {% if image_urls %}
   <h3>生成结果:</h3>
   {% for url in image_urls %}
-    <img src="/proxy-image?url={{ url }}"><br>
+    {% if url.startswith('data:') %}
+      <!-- 直接显示 base64 图片 -->
+      <img src="{{ url }}"><br>
+    {% else %}
+      <!-- 走代理加载普通 URL -->
+      <img src="/proxy-image?url={{ url }}"><br>
+    {% endif %}
   {% endfor %}
 {% endif %}
 
@@ -97,7 +103,7 @@ def generate_images(prompt, size, num):
                 print("轮询状态:", status)
                 if status == "completed":
                     image_url = j["data"]["outputs"][0]
-                    print(f"图片URL: {image_url}")
+                    print(f"图片URL前100字符: {str(image_url)[:100]}")
                     image_urls.append(image_url)
                     break
                 elif status == "failed":
