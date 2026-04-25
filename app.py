@@ -13,7 +13,7 @@ if not API_KEY:
 
 TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to-image"
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
-UPLOAD_URL = "https://0x0.st"
+CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 # =====================
 
 HTML_PAGE = """
@@ -120,13 +120,13 @@ toggleMode();
 """
 
 
-def upload_to_0x0(file):
-    """上传文件到 0x0.st，返回直链"""
+def upload_to_catbox(file):
+    """上传图片到 catbox.moe，返回直链"""
     content = file.read()
     file.seek(0)
     original_size = len(content)
 
-    # 如果超过 1MB 自动压缩
+    # 如果 > 1MB 自动压缩（catbox 限制 200MB，但压缩可提速）
     if original_size > 1 * 1024 * 1024:
         try:
             from PIL import Image
@@ -141,14 +141,15 @@ def upload_to_0x0(file):
         except ImportError:
             print("PIL 未安装，上传原图")
 
-    files = {"file": (file.filename, content, file.content_type)}
+    files = {"fileToUpload": (file.filename, content, file.content_type)}
+    data = {"reqtype": "fileupload"}
+
     try:
-        resp = requests.post(UPLOAD_URL, files=files, timeout=60)
-        print(f"0x0.st 响应状态码: {resp.status_code}")
+        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
+        print(f"catbox 响应状态码: {resp.status_code}")
         if resp.status_code != 200:
-            print(f"0x0.st 错误响应: {resp.text}")
+            print(f"catbox 错误响应: {resp.text}")
             resp.raise_for_status()
-        # 0x0.st 返回的链接在响应正文中，为纯文本（以 \n 结尾）
         url = resp.text.strip()
         if url.startswith("http"):
             print(f"上传成功: {url}")
@@ -156,7 +157,7 @@ def upload_to_0x0(file):
         else:
             raise Exception(f"返回格式异常: {url}")
     except Exception as e:
-        print(f"0x0.st 上传异常: {e}")
+        print(f"catbox 上传异常: {e}")
         raise
 
 
@@ -211,14 +212,13 @@ def generate_images(mode, prompt, size, num, image_files):
         if not image_files:
             raise Exception("请上传至少一张参考图片")
 
-        # 上传到 0x0.st 获取链接
         image_url_list = []
         for f in image_files:
             f.seek(0)
-            img_url = upload_to_0x0(f)
+            img_url = upload_to_catbox(f)
             image_url_list.append(img_url)
 
-        print(f"图床上传完成，共 {len(image_url_list)} 个链接")
+        print(f"catbox 上传完成，共 {len(image_url_list)} 个链接")
 
         payload = {
             "prompt": prompt,
