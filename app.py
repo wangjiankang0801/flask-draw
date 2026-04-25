@@ -127,7 +127,7 @@ def generate_images(mode, prompt, size, num, image_files):
     }
 
     if mode == "text2image":
-        # ===== 文生图 =====
+        # ===== 文生图（不变） =====
         url = TEXT2IMAGE_URL
         image_urls = []
         for i in range(num):
@@ -159,7 +159,6 @@ def generate_images(mode, prompt, size, num, image_files):
                         image_urls.append(image_url)
                         break
                     elif status == "failed":
-                        # 打印错误详情
                         error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
                         print(f"文生图失败，完整响应: {j}")
                         raise Exception(f"生成失败: {error_detail}")
@@ -170,29 +169,30 @@ def generate_images(mode, prompt, size, num, image_files):
         return image_urls
 
     else:  # image2image
-        # ===== 图生图 =====
+        # ===== 图生图：改用 data URL 格式 =====
         url = IMAGE_EDIT_URL
 
-        # 将上传图片转成纯 base64（不加 data: 前缀），放入列表
-        images_base64 = []
+        # 将图片转成 data URL
+        image_data_urls = []
         for f in image_files:
             content = f.read()
             b64 = base64.b64encode(content).decode("utf-8")
-            images_base64.append(b64)
+            # 构建完整的 Data URL
+            data_url = f"data:image/png;base64,{b64}"
+            image_data_urls.append(data_url)
             f.seek(0)
 
-        # API 要求 "image" 字段且值为数组
         payload = {
             "prompt": prompt,
-            "image": images_base64,
+            "image": image_data_urls,      # 现在是一个 Data URL 的数组
             "output_format": "png",
             "size": size,
             "num_outputs": num
         }
 
-        print(f"发起图生图请求，prompt: {prompt}, images: {len(images_base64)}张")
-        if images_base64:
-            print(f"第一张图片 base64 长度: {len(images_base64[0])}")
+        print(f"发起图生图请求（Data URL格式），prompt: {prompt}, images: {len(image_data_urls)}张")
+        if image_data_urls:
+            print(f"第一张图片 Data URL 长度: {len(image_data_urls[0])}")
 
         try:
             response = requests.post(url, json=payload, headers=headers, timeout=60)
@@ -221,7 +221,6 @@ def generate_images(mode, prompt, size, num, image_files):
                 outputs = j["data"]["outputs"]
                 image_urls = []
                 for image_url in outputs:
-                    # 补全 base64 前缀（如果缺少）
                     if image_url and not image_url.startswith("data:") and not image_url.startswith("http"):
                         image_url = "data:image/png;base64," + image_url
                         print("已补全 base64 前缀")
@@ -229,12 +228,11 @@ def generate_images(mode, prompt, size, num, image_files):
                 return image_urls
 
             elif status == "failed":
-                # 打印完整的失败响应，方便定位
                 print("图生图失败，完整响应:", j)
                 error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
                 raise Exception(f"生成失败: {error_detail}")
             else:
-                pass  # 继续轮询
+                pass
             time.sleep(2)
 
 
@@ -255,11 +253,11 @@ def index():
 
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
-            # 预览上传的参考图（加前缀，HTML显示）
+            # 预览参考图
             for f in image_files:
                 content = f.read()
                 uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
-                f.seek(0)  # 重置指针
+                f.seek(0)
 
         try:
             image_urls = generate_images(mode, prompt, size, num, image_files)
