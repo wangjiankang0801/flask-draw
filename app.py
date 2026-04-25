@@ -1,7 +1,8 @@
-import time
 import os
-from flask import Flask, request, render_template_string
+import time
+import base64
 import requests
+from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
@@ -9,30 +10,33 @@ app = Flask(__name__)
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
     raise RuntimeError("请设置环境变量 API_KEY")
-TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to-image"
+IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
 # =================================================
 
 HTML_PAGE = """
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>GPTs API 手机画图</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="data:,">
-  <style>
-    body { font-family: Arial; margin: 20px; }
-    input[type=text], select { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
-    input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    img { margin-top: 20px; max-width: 100%; height: auto; border: 1px solid #ccc; }
-    .error { color: red; margin-top: 10px; }
-    .loading { color: blue; margin-top: 10px; }
-  </style>
+<meta charset="utf-8">
+<title>GPTs AI 图生图</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:,">
+<style>
+body { font-family: Arial; margin: 20px; }
+input[type=text], select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
+input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
+img.thumb { width: 120px; height: 120px; object-fit: cover; margin: 4px; cursor: pointer; border: 1px solid #ccc; }
+.container { display: flex; flex-wrap: wrap; gap: 10px; }
+.error { color: red; margin-top: 10px; }
+.loading { color: blue; margin-top: 10px; }
+.modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; }
+.modal img { max-width:90%; max-height:90%; }
+</style>
 </head>
 <body>
-<h2>GPTs API 手机画图</h2>
+<h2>GPTs AI 图生图</h2>
 
-<form method="post" action="/">
+<form method="post" action="/" enctype="multipart/form-data">
   Prompt: <input type="text" name="prompt" maxlength="200" placeholder="输入你的创意提示" required><br>
   尺寸: 
   <select name="size">
@@ -46,94 +50,99 @@ HTML_PAGE = """
     <option value="2">2</option>
     <option value="3">3</option>
   </select><br>
+  上传参考图片（可多张）: <input type="file" name="image_files" accept="image/*" multiple><br>
   <input type="submit" value="生成图片">
 </form>
 
 {% if loading %}
-  <div class="loading">正在生成，请稍候…</div>
+<div class="loading">正在生成，请稍候…</div>
+{% endif %}
+
+{% if uploaded_images %}
+<h3>参考图片:</h3>
+<div class="container">
+{% for url in uploaded_images %}
+  <img class="thumb" src="{{ url }}" onclick="showModal(this.src)">
+{% endfor %}
+</div>
 {% endif %}
 
 {% if image_urls %}
-  <h3>生成结果:</h3>
-  {% for url in image_urls %}
-    {% if url.startswith('data:') %}
-      <!-- 直接显示 base64 图片 -->
-      <img src="{{ url }}"><br>
-    {% else %}
-      <!-- 走代理加载普通 URL -->
-      <img src="/proxy-image?url={{ url }}"><br>
-    {% endif %}
-  {% endfor %}
+<h3>生成结果:</h3>
+<div class="container">
+{% for url in image_urls %}
+  <img class="thumb" src="{{ url }}" onclick="showModal(this.src)">
+{% endfor %}
+</div>
 {% endif %}
 
 {% if error %}
-  <div class="error">{{ error }}</div>
+<div class="error">{{ error }}</div>
 {% endif %}
+
+<div class="modal" id="modal" onclick="hideModal()">
+  <img id="modalImg" src="">
+</div>
+
+<script>
+function showModal(src){
+    document.getElementById('modalImg').src = src;
+    document.getElementById('modal').style.display='flex';
+}
+function hideModal(){
+    document.getElementById('modal').style.display='none';
+}
+</script>
+
 </body>
 </html>
 """
 
-def generate_images(prompt, size, num):
+def generate_images(prompt, size, num, image_files):
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
-    image_urls = []
-    for i in range(num):
-        payload = {
-            "prompt": prompt,
-            "aspect_ratio": "1:1",
-            "output_format": "png"
-        }
-        print(f"尝试生成第 {i+1} 张图片，prompt: {prompt}")
-        try:
-            response = requests.post(TEXT2IMAGE_URL, json=payload, headers=headers, timeout=30)
-            print(f"POST 响应状态码: {response.status_code}")
-            response.raise_for_status()
-            data = response.json()["data"]
-            get_url = data["urls"]["get"]
-            print(f"获取到查询URL: {get_url}")
+    # 上传图片转 base64
+    images_base64 = []
+    for f in image_files:
+        content = f.read()
+        images_base64.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
 
-            # 轮询直到生成完成
-            while True:
-                r = requests.get(get_url, headers=headers)
-                r.raise_for_status()
-                j = r.json()
-                status = j["data"]["status"]
-                print("轮询状态:", status)
-                if status == "completed":
-                    image_url = j["data"]["outputs"][0]
-                    print(f"图片URL前100字符: {str(image_url)[:100]}")
-                    # 如果返回的是纯 base64 数据（没有 data: 前缀），补全前缀
-                    if image_url and not image_url.startswith('data:') and not image_url.startswith('http'):
-                        image_url = "data:image/png;base64," + image_url
-                        print("已补全 base64 前缀")
-                    image_urls.append(image_url)
-                    break
-                elif status == "failed":
-                    print("API 返回生成失败")
-                    raise Exception("生成失败")
-                time.sleep(2)
-        except Exception as e:
-            print(f"生成第 {i+1} 张时出错: {e}")
-            raise  # 重新抛出，让上层捕获后显示在页面
-    return image_urls
+    payload = {
+        "prompt": prompt,
+        "images": images_base64,
+        "output_format": "png",
+        "size": size,
+        "num_outputs": num
+    }
 
-@app.route('/proxy-image')
-def proxy_image():
-    url = request.args.get('url')
-    if not url:
-        return "缺少url", 400
-    headers = {"Authorization": f"Bearer {API_KEY}"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        return resp.content, 200, {'Content-Type': 'image/png'}
-    except Exception as e:
-        print(f"代理图片失败: {e}")
-        return f"图片加载失败: {e}", 500
+    response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    data = response.json()["data"]
+    get_url = data["urls"]["get"]
+
+    # 轮询获取生成结果
+    while True:
+        r = requests.get(get_url, headers=headers)
+        r.raise_for_status()
+        j = r.json()
+        status = j["data"]["status"]
+        if status == "completed":
+            outputs = j["data"]["outputs"]
+            image_urls = []
+            for image_url in outputs:
+                if image_url and not image_url.startswith("data:") and not image_url.startswith("http"):
+                    image_url = "data:image/png;base64," + image_url
+                image_urls.append(image_url)
+            return image_urls
+        elif status == "failed":
+            raise Exception("生成失败")
+        time.sleep(2)
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    uploaded_images = []
     image_urls = None
     error_msg = None
     loading = False
@@ -141,14 +150,21 @@ def index():
         prompt = request.form["prompt"]
         size = request.form.get("size", "512")
         num = int(request.form.get("num", "1"))
+        image_files = request.files.getlist("image_files")
         loading = True
-        print(f"收到生成请求: prompt={prompt}, size={size}, num={num}")
+
+        # 展示上传的参考图
+        for f in image_files:
+            content = f.read()
+            uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
+            f.seek(0)  # 重置文件指针，供后端生成使用
+
         try:
-            image_urls = generate_images(prompt, size, num)
+            image_urls = generate_images(prompt, size, num, image_files)
         except Exception as e:
             error_msg = f"生成失败: {e}"
-            print(f"最终错误信息: {error_msg}")
-    return render_template_string(HTML_PAGE, image_urls=image_urls, error=error_msg, loading=loading)
+
+    return render_template_string(HTML_PAGE, image_urls=image_urls, error=error_msg, loading=loading, uploaded_images=uploaded_images)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
