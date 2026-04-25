@@ -56,7 +56,7 @@ HTML_PAGE = """
 {% if image_urls %}
   <h3>生成结果:</h3>
   {% for url in image_urls %}
-    <img src="{{ url }}"><br>
+    <img src="/proxy-image?url={{ url }}"><br>
   {% endfor %}
 {% endif %}
 
@@ -98,6 +98,15 @@ def generate_images(prompt, size, num):
                 raise Exception("生成失败")
             time.sleep(2)
     return image_urls
+
+@app.route('/proxy-image')
+def proxy_image():
+    url = request.args.get('url')
+    if not url:
+        return "缺少url", 400
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    resp = requests.get(url, headers=headers)
+    return resp.content, 200, {'Content-Type': 'image/png'}
 
 @app.route("/", methods=["GET", "POST"])
 def index():
