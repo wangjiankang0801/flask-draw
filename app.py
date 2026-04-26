@@ -1,12 +1,14 @@
 import time
 import os
 import base64
+import re
+import json
 import requests
 from flask import Flask, request, render_template_string
 
 app = Flask(__name__)
 
-# ===== API 设置 =====
+# ===== 图像 API 设置 =====
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
     raise RuntimeError("请设置环境变量 API_KEY")
@@ -15,20 +17,249 @@ TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
 CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 
-# 默认负面提示词
+# ===== 大模型 API 设置（DeepSeek-V3） =====
+LLM_API_KEY = os.environ.get("LLM_API_KEY")          # 百度千帆的 API Key
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://qianfan.baidubce.com/v2/chat/completions")
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v3.1-250821")
+
+# 如果未设置大模型密钥，则禁用优化功能
+ENABLE_LLM_OPT = bool(LLM_API_KEY)
+
 DEFAULT_NEGATIVE_PROMPT = (
     "low quality, blurry, distorted, deformed, bad anatomy, "
     "mutated hands, extra fingers, missing fingers, bad proportions, "
     "text, watermark, signature, logo"
 )
-# =====================
 
+# ===== 大模型调用函数 =====
+def call_llm_for_optimization(user_prompt: str):
+    """
+    调用大模型，返回优化后的参数。
+    返回格式：{"optimized_prompt": str, "style": str, "size": int, "steps": int}
+    """
+    system_prompt = """你是一个专业的绘画提示词优化助手。
+用户输入一句大白话，你需要将它转换成适合高质量图像生成的参数。
+
+请严格按照以下JSON格式输出，不要有任何额外文字：
+{
+    "optimized_prompt": "优化后的英文或中文绘画描述，需结构清晰、细节丰富",
+    "style": "一种风格，可选值：realistic, anime, digital-painting, oil-painting, pixel-art",
+    "size": 尺寸数字，仅允许 256, 512, 1024 中的一个，
+    "steps": 步数，仅允许 30, 50, 100 中的一个
+}
+
+示例：
+用户输入："一只可爱的猫"
+输出：
+{
+    "optimized_prompt": "一只可爱的猫，毛茸茸的，大眼睛，好奇的表情，柔和的自然光，高细节，4K",
+    "style": "realistic",
+    "size": 512,
+    "steps": 50
+}
+"""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LLM_API_KEY}"
+    }
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 300
+    }
+    try:
+        resp = requests.post(LLM_BASE_URL, json=payload, headers=headers, timeout=20)
+        resp.raise_for_status()
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+        # 提取JSON
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            params = json.loads(json_match.group())
+            # 校验并修正值
+            allowed_styles = ["realistic", "anime", "digital-painting", "oil-painting", "pixel-art"]
+            if params.get("style") not in allowed_styles:
+                params["style"] = "realistic"
+            if params.get("size") not in [256, 512, 1024]:
+                params["size"] = 512
+            if params.get("steps") not in [30, 50, 100]:
+                params["steps"] = 50
+            return params
+        else:
+            print("大模型返回未包含JSON，使用原始prompt")
+            return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30}
+    except Exception as e:
+        print(f"调用大模型失败：{e}，使用原始参数")
+        return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30}
+
+# ===== 原有函数（上传、生成等）保持不变 =====
+def upload_bytes_to_catbox(img_bytes, filename="generated.png"):
+    files = {"fileToUpload": (filename, img_bytes, "image/png")}
+    data = {"reqtype": "fileupload"}
+    try:
+        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
+        if resp.status_code != 200:
+            print(f"catbox 备份上传失败: {resp.text}")
+            return None
+        url = resp.text.strip()
+        if url.startswith("http"):
+            print(f"图片已备份到 catbox: {url}")
+            return url
+        else:
+            print(f"catbox 返回异常: {url}")
+            return None
+    except Exception as e:
+        print(f"备份上传异常: {e}")
+        return None
+
+def upload_to_catbox(file):
+    content = file.read()
+    file.seek(0)
+    original_size = len(content)
+    if original_size > 1 * 1024 * 1024:
+        try:
+            from PIL import Image
+            from io import BytesIO
+            img = Image.open(BytesIO(content))
+            img.thumbnail((1024, 1024))
+            buf = BytesIO()
+            img.save(buf, format='PNG' if img.mode == 'RGBA' else 'JPEG', quality=85)
+            content = buf.getvalue()
+            file.filename = file.filename.rsplit('.', 1)[0] + '.jpg'
+            print(f"图片已压缩，{original_size/1024:.1f}KB -> {len(content)/1024:.1f}KB")
+        except ImportError:
+            print("PIL 未安装，上传原图")
+    files = {"fileToUpload": (file.filename, content, file.content_type)}
+    data = {"reqtype": "fileupload"}
+    try:
+        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
+        if resp.status_code != 200:
+            print(f"catbox 错误响应: {resp.text}")
+            resp.raise_for_status()
+        url = resp.text.strip()
+        if url.startswith("http"):
+            print(f"上传成功: {url}")
+            return url
+        else:
+            raise Exception(f"返回格式异常: {url}")
+    except Exception as e:
+        print(f"catbox 上传异常: {e}")
+        raise
+
+def process_generated_output(raw_output):
+    display_url = raw_output
+    if display_url and not display_url.startswith('data:') and not display_url.startswith('http'):
+        display_url = "data:image/png;base64," + display_url
+    img_bytes = None
+    if raw_output.startswith('data:image/png;base64,'):
+        b64_data = raw_output[len('data:image/png;base64,'):]
+        img_bytes = base64.b64decode(b64_data)
+    elif not raw_output.startswith('http'):
+        img_bytes = base64.b64decode(raw_output)
+    else:
+        try:
+            resp = requests.get(raw_output, timeout=30)
+            resp.raise_for_status()
+            img_bytes = resp.content
+        except Exception as e:
+            print(f"下载生成图片失败: {e}")
+    catbox_url = None
+    if img_bytes:
+        catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
+    return {"display_url": display_url, "catbox_url": catbox_url}
+
+def generate_images(mode, prompt, size, num, style, steps, image_files):
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload_base = {
+        "output_format": "png",
+        "size": f"{size}x{size}",
+        "num_outputs": num,
+        "style": style,
+        "steps": steps,
+        "negative_prompt": DEFAULT_NEGATIVE_PROMPT
+    }
+    if mode == "text2image":
+        url = TEXT2IMAGE_URL
+        payload = {"prompt": prompt, **payload_base}
+        results = []
+        for i in range(num):
+            print(f"尝试生成第 {i+1} 张图片（文生图），prompt: {prompt}")
+            try:
+                response = requests.post(url, json=payload, headers=headers, timeout=30)
+                response.raise_for_status()
+                data = response.json()["data"]
+                get_url = data["urls"]["get"]
+                while True:
+                    r = requests.get(get_url, headers=headers)
+                    r.raise_for_status()
+                    j = r.json()
+                    status = j["data"]["status"]
+                    if status == "completed":
+                        output = j["data"]["outputs"][0]
+                        result_item = process_generated_output(output)
+                        results.append(result_item)
+                        break
+                    elif status == "failed":
+                        error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
+                        raise Exception(f"生成失败: {error_detail}")
+                    time.sleep(2)
+            except Exception as e:
+                print(f"文生图第 {i+1} 张出错: {e}")
+                raise
+        return results
+    else:  # image2image
+        if not image_files:
+            raise Exception("请上传至少一张参考图片")
+        image_url_list = []
+        for f in image_files:
+            f.seek(0)
+            img_url = upload_to_catbox(f)
+            image_url_list.append(img_url)
+        payload = {"prompt": prompt, "images": image_url_list, **payload_base}
+        print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
+        try:
+            response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
+        except Exception as e:
+            print(f"图生图 POST 请求失败: {e}")
+            raise
+        if response.status_code != 200:
+            print(f"错误响应: {response.text}")
+            response.raise_for_status()
+        data = response.json().get("data")
+        if not data:
+            raise Exception(f"响应中没有 data: {response.json()}")
+        get_url = data["urls"]["get"]
+        while True:
+            r = requests.get(get_url, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            status = j.get("data", {}).get("status")
+            if status == "completed":
+                outputs = j["data"]["outputs"]
+                results = []
+                for output in outputs:
+                    result_item = process_generated_output(output)
+                    results.append(result_item)
+                return results
+            elif status == "failed":
+                error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
+                raise Exception(f"生成失败: {error_detail}")
+            time.sleep(2)
+
+# ===== HTML 模板（与原来几乎一样，但可以增加提示信息） =====
 HTML_PAGE = """
 <!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>GPTs AI 画图</title>
+  <title>GPTs AI 画图 + DeepSeek 智能优化</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:,">
   <style>
@@ -37,45 +268,42 @@ HTML_PAGE = """
     input[type=file] { color: transparent; width: auto; }
     textarea { resize: vertical; line-height: 1.5; }
     input[type=button], input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    
     img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
     img.result-thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
-    
     .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
-    
     .preview-item { position: relative; display: inline-block; }
     .preview-item .delete-btn {
       position: absolute; top: 0; right: 0;
       background: rgba(255,0,0,0.7); color: white; border: none; border-radius: 50%;
       width: 22px; height: 22px; font-size: 14px; line-height: 22px; text-align: center; cursor: pointer;
     }
-    
     .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
     .modal img { max-width: 95vw; max-height: 95vh; transform-origin: center center; transition: transform 0.1s ease; user-select: none; }
-    
     #preview_section { margin: 12px 0; }
     #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
     #upload_section { display:none; margin: 8px 0; }
     #size_section, #num_section, #style_section, #steps_section { display: inline-block; margin-right: 12px; margin-top: 8px; }
-    
     .confirm-dialog {
       display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%;
       background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
     }
-    .confirm-box {
-      background: white; padding: 20px; border-radius: 10px; text-align: center; max-width: 300px;
-    }
+    .confirm-box { background: white; padding: 20px; border-radius: 10px; text-align: center; max-width: 300px; }
     .confirm-box button { margin: 10px 5px; padding: 8px 20px; font-size: 16px; }
     .btn-generate { background: #007bff; color: white; border: none; }
     .btn-cancel { background: #ccc; border: none; }
-    
     .catbox-link { font-size: 12px; word-break: break-all; display: block; margin-top: 4px; color: #666; }
+    .opt-note { background: #eef; padding: 6px 12px; border-radius: 8px; margin: 10px 0; font-size: 14px; }
   </style>
 </head>
 <body>
-<h2>GPTs AI 画图（文生图 / 图生图）</h2>
+<h2>GPTs AI 画图 + DeepSeek 智能优化</h2>
+{% if enable_llm %}
+<div class="opt-note">✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动优化为更适合 AI 绘画的参数。</div>
+{% else %}
+<div class="opt-note">⚠️ 未配置大模型 API Key，将使用原始参数生成。</div>
+{% endif %}
 
 <form id="main-form" method="post" action="/" enctype="multipart/form-data">
   <label>
@@ -292,7 +520,6 @@ modal.addEventListener('click', function(e) {
     if (e.target === modal) { hideModal(); }
 });
 
-// 确认弹窗
 document.getElementById('submit-btn').addEventListener('click', function() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
     if (mode === 'image2image') {
@@ -325,190 +552,9 @@ document.getElementById('confirm-no').addEventListener('click', function() {
 
 toggleMode();
 </script>
-
 </body>
 </html>
 """
-
-
-def upload_bytes_to_catbox(img_bytes, filename="generated.png"):
-    """将图片字节上传到 catbox.moe，返回直链"""
-    files = {"fileToUpload": (filename, img_bytes, "image/png")}
-    data = {"reqtype": "fileupload"}
-    try:
-        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
-        if resp.status_code != 200:
-            print(f"catbox 备份上传失败: {resp.text}")
-            return None
-        url = resp.text.strip()
-        if url.startswith("http"):
-            print(f"图片已备份到 catbox: {url}")
-            return url
-        else:
-            print(f"catbox 返回异常: {url}")
-            return None
-    except Exception as e:
-        print(f"备份上传异常: {e}")
-        return None
-
-
-def upload_to_catbox(file):
-    """上传参考图片到 catbox.moe，返回直链"""
-    content = file.read()
-    file.seek(0)
-    original_size = len(content)
-
-    if original_size > 1 * 1024 * 1024:
-        try:
-            from PIL import Image
-            from io import BytesIO
-            img = Image.open(BytesIO(content))
-            img.thumbnail((1024, 1024))
-            buf = BytesIO()
-            img.save(buf, format='PNG' if img.mode == 'RGBA' else 'JPEG', quality=85)
-            content = buf.getvalue()
-            file.filename = file.filename.rsplit('.', 1)[0] + '.jpg'
-            print(f"图片已压缩，{original_size/1024:.1f}KB -> {len(content)/1024:.1f}KB")
-        except ImportError:
-            print("PIL 未安装，上传原图")
-
-    files = {"fileToUpload": (file.filename, content, file.content_type)}
-    data = {"reqtype": "fileupload"}
-
-    try:
-        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
-        if resp.status_code != 200:
-            print(f"catbox 错误响应: {resp.text}")
-            resp.raise_for_status()
-        url = resp.text.strip()
-        if url.startswith("http"):
-            print(f"上传成功: {url}")
-            return url
-        else:
-            raise Exception(f"返回格式异常: {url}")
-    except Exception as e:
-        print(f"catbox 上传异常: {e}")
-        raise
-
-
-def process_generated_output(raw_output):
-    """处理生成的单个输出，返回 {'display_url': ..., 'catbox_url': ...}"""
-    display_url = raw_output
-    if display_url and not display_url.startswith('data:') and not display_url.startswith('http'):
-        display_url = "data:image/png;base64," + display_url
-
-    img_bytes = None
-    if raw_output.startswith('data:image/png;base64,'):
-        b64_data = raw_output[len('data:image/png;base64,'):]
-        img_bytes = base64.b64decode(b64_data)
-    elif not raw_output.startswith('http'):
-        img_bytes = base64.b64decode(raw_output)
-    else:
-        try:
-            resp = requests.get(raw_output, timeout=30)
-            resp.raise_for_status()
-            img_bytes = resp.content
-        except Exception as e:
-            print(f"下载生成图片失败: {e}")
-
-    catbox_url = None
-    if img_bytes:
-        catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
-    return {"display_url": display_url, "catbox_url": catbox_url}
-
-
-def generate_images(mode, prompt, size, num, style, steps, image_files):
-    headers = {
-        "Authorization": f"Bearer {API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    payload_base = {
-        "output_format": "png",
-        "size": f"{size}x{size}",
-        "num_outputs": num,
-        "style": style,
-        "steps": steps,
-        "negative_prompt": DEFAULT_NEGATIVE_PROMPT
-    }
-
-    if mode == "text2image":
-        url = TEXT2IMAGE_URL
-        payload = {"prompt": prompt, **payload_base}
-        # 文生图不需要 images 字段
-        results = []
-        for i in range(num):
-            print(f"尝试生成第 {i+1} 张图片（文生图），prompt: {prompt}")
-            try:
-                response = requests.post(url, json=payload, headers=headers, timeout=30)
-                response.raise_for_status()
-                data = response.json()["data"]
-                get_url = data["urls"]["get"]
-                print(f"获取到查询URL: {get_url}")
-
-                while True:
-                    r = requests.get(get_url, headers=headers)
-                    r.raise_for_status()
-                    j = r.json()
-                    status = j["data"]["status"]
-                    if status == "completed":
-                        output = j["data"]["outputs"][0]
-                        result_item = process_generated_output(output)
-                        results.append(result_item)
-                        break
-                    elif status == "failed":
-                        error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
-                        raise Exception(f"生成失败: {error_detail}")
-                    time.sleep(2)
-            except Exception as e:
-                print(f"文生图第 {i+1} 张出错: {e}")
-                raise
-        return results
-
-    else:  # image2image
-        if not image_files:
-            raise Exception("请上传至少一张参考图片")
-
-        image_url_list = []
-        for f in image_files:
-            f.seek(0)
-            img_url = upload_to_catbox(f)
-            image_url_list.append(img_url)
-
-        payload = {"prompt": prompt, "images": image_url_list, **payload_base}
-
-        print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
-        try:
-            response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
-        except Exception as e:
-            print(f"图生图 POST 请求失败: {e}")
-            raise
-        if response.status_code != 200:
-            print(f"错误响应: {response.text}")
-            response.raise_for_status()
-
-        data = response.json().get("data")
-        if not data:
-            raise Exception(f"响应中没有 data: {response.json()}")
-        get_url = data["urls"]["get"]
-
-        while True:
-            r = requests.get(get_url, headers=headers)
-            r.raise_for_status()
-            j = r.json()
-            status = j.get("data", {}).get("status")
-            if status == "completed":
-                outputs = j["data"]["outputs"]
-                results = []
-                for output in outputs:
-                    result_item = process_generated_output(output)
-                    results.append(result_item)
-                return results
-            elif status == "failed":
-                error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
-                raise Exception(f"生成失败: {error_detail}")
-            time.sleep(2)
-
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -516,17 +562,34 @@ def index():
     image_results = None
     error_msg = None
     loading = False
+
     if request.method == "POST":
         mode = request.form.get("mode", "text2image")
-        prompt = request.form["prompt"]
+        original_prompt = request.form["prompt"]
         size = request.form.get("size", "512")
         num = int(request.form.get("num", "1"))
         style = request.form.get("style", "realistic")
         steps = int(request.form.get("steps", "30"))
         image_files = []
         loading = True
-        print(f"收到请求: mode={mode}, prompt={prompt}, size={size}, num={num}, style={style}, steps={steps}")
 
+        # 1. 如果启用了大模型优化，调用 LLM 获取优化后的参数
+        if ENABLE_LLM_OPT:
+            try:
+                opt_result = call_llm_for_optimization(original_prompt)
+                optimized_prompt = opt_result.get("optimized_prompt", original_prompt)
+                # 用大模型推荐的参数覆盖用户的选择
+                style = opt_result.get("style", style)
+                size = str(opt_result.get("size", int(size)))   # 确保是字符串
+                steps = int(opt_result.get("steps", steps))
+                print(f"大模型优化结果: prompt='{optimized_prompt}', style={style}, size={size}, steps={steps}")
+            except Exception as e:
+                print(f"大模型优化失败，使用原始参数: {e}")
+                optimized_prompt = original_prompt
+        else:
+            optimized_prompt = original_prompt
+
+        # 2. 处理图生图的上传文件
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
             for f in image_files:
@@ -535,8 +598,9 @@ def index():
                 uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
                 f.seek(0)
 
+        # 3. 调用图像生成 API
         try:
-            image_results = generate_images(mode, prompt, size, num, style, steps, image_files)
+            image_results = generate_images(mode, optimized_prompt, int(size), num, style, steps, image_files)
         except Exception as e:
             error_msg = f"生成失败: {e}"
             print(f"最终错误: {error_msg}")
@@ -545,9 +609,9 @@ def index():
                                   image_results=image_results,
                                   error=error_msg,
                                   loading=loading,
-                                  uploaded_images=uploaded_images)
+                                  uploaded_images=uploaded_images,
+                                  enable_llm=ENABLE_LLM_OPT)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
-    
