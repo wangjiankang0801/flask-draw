@@ -40,6 +40,27 @@ HTML_PAGE = """
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
     
+    /* 预览项容器，用于定位删除按钮 */
+    .preview-item {
+      position: relative;
+      display: inline-block;
+    }
+    .preview-item .delete-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: rgba(255,0,0,0.7);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 22px;
+      height: 22px;
+      font-size: 14px;
+      line-height: 22px;
+      text-align: center;
+      cursor: pointer;
+    }
+    
     /* 弹窗缩放核心样式 */
     .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
     .modal img { 
@@ -111,7 +132,7 @@ HTML_PAGE = """
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
-<!-- 参考图片区域（使用 thumb 类，160x160） -->
+<!-- 参考图片区域（服务器返回的，暂时保留） -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -121,7 +142,7 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
-<!-- 生成结果区域（使用 result-thumb 类，300x300，附带永久链接） -->
+<!-- 生成结果区域 -->
 {% if image_results %}
   <h3>生成结果:</h3>
   <div class="container">
@@ -140,7 +161,7 @@ HTML_PAGE = """
   <div class="error">{{ error }}</div>
 {% endif %}
 
-<!-- 图片放大弹窗（保留原有缩放拖拽功能） -->
+<!-- 图片放大弹窗 -->
 <div class="modal" id="modal" onclick="hideModal()">
   <img id="modalImg" src="">
 </div>
@@ -165,31 +186,74 @@ let isDragging = false;
 const modal = document.getElementById('modal');
 const modalImg = document.getElementById('modalImg');
 
+// ---------- 全局文件数组 ----------
+let selectedFiles = [];
+
 function toggleMode() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
 }
 
-// 即时预览
-document.getElementById('image_input').addEventListener('change', function(e) {
-    const previewContainer = document.getElementById('preview_container');
-    previewContainer.innerHTML = '';
-    const files = e.target.files;
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        if (!file.type.startsWith('image/')) continue;
+// 重新渲染预览
+function renderPreview() {
+    const container = document.getElementById('preview_container');
+    container.innerHTML = '';
+    if (selectedFiles.length === 0) return;
+    
+    selectedFiles.forEach((file, index) => {
         const reader = new FileReader();
-        reader.onload = function(event) {
+        reader.onload = function(e) {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'preview-item';
+            
             const img = document.createElement('img');
             img.className = 'thumb';
-            img.src = event.target.result;
+            img.src = e.target.result;
             img.onclick = function() { showModal(this.src); };
-            previewContainer.appendChild(img);
+            
+            const delBtn = document.createElement('span');
+            delBtn.className = 'delete-btn';
+            delBtn.innerHTML = '✕';
+            delBtn.title = '删除此图片';
+            delBtn.onclick = function(ev) {
+                ev.stopPropagation();
+                // 从数组中移除
+                selectedFiles.splice(index, 1);
+                // 重新渲染预览
+                renderPreview();
+                // 同步更新 file input（仅用于显示，实际提交用 FormData）
+                updateFileInput();
+            };
+            
+            itemDiv.appendChild(img);
+            itemDiv.appendChild(delBtn);
+            container.appendChild(itemDiv);
         };
         reader.readAsDataURL(file);
-    }
+    });
+}
+
+// 更新 file input 的 files（虽然提交时不依赖它，但为了可能的后备）
+function updateFileInput() {
+    const dt = new DataTransfer();
+    selectedFiles.forEach(f => dt.items.add(f));
+    document.getElementById('image_input').files = dt.files;
+}
+
+// 监听文件选择
+document.getElementById('image_input').addEventListener('change', function(e) {
+    const newFiles = Array.from(e.target.files);
+    // 合并到 selectedFiles（去重）
+    newFiles.forEach(file => {
+        // 简单去重（根据名称和大小）
+        const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size);
+        if (!exists) selectedFiles.push(file);
+    });
+    renderPreview();
+    updateFileInput();
 });
 
+// ---------- 缩放拖拽相关（保持不变） ----------
 function showModal(src){
     modalImg.src = src;
     modal.style.display = 'flex';
@@ -205,7 +269,6 @@ function updateTransform() {
     modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
 }
 
-// 滚轮缩放
 modalImg.addEventListener('wheel', function(e) {
     e.preventDefault();
     const scaleStep = 0.1;
@@ -217,7 +280,6 @@ modalImg.addEventListener('wheel', function(e) {
     updateTransform();
 });
 
-// 鼠标拖拽
 modalImg.addEventListener('mousedown', function(e) {
     e.preventDefault();
     isDragging = true;
@@ -235,7 +297,6 @@ document.addEventListener('mouseup', function() {
     isDragging = false;
 });
 
-// 移动端触摸
 modalImg.addEventListener('touchstart', function(e) {
     isDragging = true;
     startX = e.touches[0].clientX - currentX;
@@ -261,13 +322,11 @@ modal.addEventListener('click', function(e) {
 document.getElementById('submit-btn').addEventListener('click', function() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
     if (mode === 'image2image') {
-        var files = document.getElementById('image_input').files;
-        if (files.length === 0) {
+        if (selectedFiles.length === 0) {
             alert("请先上传参考图片再生成");
             return;
         }
     }
-    // 显示确认弹窗
     document.getElementById('confirm-dialog').style.display = 'flex';
 });
 
@@ -276,7 +335,33 @@ document.getElementById('confirm-yes').addEventListener('click', function() {
     var btn = document.getElementById('submit-btn');
     btn.value = '生成中…';
     btn.disabled = true;
-    document.getElementById('main-form').submit();
+    
+    // 使用 FormData 提交，确保 selectedFiles 被发送
+    var form = document.getElementById('main-form');
+    var formData = new FormData(form);
+    // 清除原有的 image_files 字段（因为可能含有旧的文件）
+    formData.delete('image_files');
+    // 将 selectedFiles 中的文件逐个添加
+    selectedFiles.forEach(file => {
+        formData.append('image_files', file);
+    });
+    
+    // 用 fetch 发送 POST 请求，然后刷新页面显示结果
+    fetch(form.action, {
+        method: 'POST',
+        body: formData
+    }).then(response => response.text())
+    .then(html => {
+        document.open();
+        document.write(html);
+        document.close();
+        // 恢复按钮状态（页面被替换，不需要重置）
+    }).catch(err => {
+        console.error(err);
+        btn.value = '生成图片';
+        btn.disabled = false;
+        alert('提交失败，请重试');
+    });
 });
 
 document.getElementById('confirm-no').addEventListener('click', function() {
@@ -355,20 +440,16 @@ def upload_to_catbox(file):
 def process_generated_output(raw_output):
     """处理生成的单个输出，返回 {'display_url': ..., 'catbox_url': ...}"""
     display_url = raw_output
-    # 补全 base64 前缀
     if display_url and not display_url.startswith('data:') and not display_url.startswith('http'):
         display_url = "data:image/png;base64," + display_url
 
-    # 提取图片字节数据
     img_bytes = None
     if raw_output.startswith('data:image/png;base64,'):
         b64_data = raw_output[len('data:image/png;base64,'):]
         img_bytes = base64.b64decode(b64_data)
     elif not raw_output.startswith('http'):
-        # 纯 base64
         img_bytes = base64.b64decode(raw_output)
     else:
-        # 是普通 URL，尝试下载
         try:
             resp = requests.get(raw_output, timeout=30)
             resp.raise_for_status()
@@ -376,7 +457,6 @@ def process_generated_output(raw_output):
         except Exception as e:
             print(f"下载生成图片失败: {e}")
 
-    # 上传到 catbox 备份
     catbox_url = None
     if img_bytes:
         catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
@@ -411,7 +491,6 @@ def generate_images(mode, prompt, size, num, image_files):
                     r.raise_for_status()
                     j = r.json()
                     status = j["data"]["status"]
-                    print("轮询状态:", status)
                     if status == "completed":
                         output = j["data"]["outputs"][0]
                         result_item = process_generated_output(output)
@@ -452,7 +531,6 @@ def generate_images(mode, prompt, size, num, image_files):
         except Exception as e:
             print(f"图生图 POST 请求失败: {e}")
             raise
-        print(f"图生图 POST 响应状态码: {response.status_code}")
         if response.status_code != 200:
             print(f"错误响应: {response.text}")
             response.raise_for_status()
@@ -461,14 +539,12 @@ def generate_images(mode, prompt, size, num, image_files):
         if not data:
             raise Exception(f"响应中没有 data: {response.json()}")
         get_url = data["urls"]["get"]
-        print(f"获取到查询URL: {get_url}")
 
         while True:
             r = requests.get(get_url, headers=headers)
             r.raise_for_status()
             j = r.json()
             status = j.get("data", {}).get("status")
-            print("轮询状态:", status)
             if status == "completed":
                 outputs = j["data"]["outputs"]
                 results = []
@@ -499,6 +575,7 @@ def index():
 
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
+            # 预览用（服务器端返回后不再需要，但保留兼容）
             for f in image_files:
                 f.seek(0)
                 content = f.read()
