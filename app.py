@@ -14,6 +14,13 @@ if not API_KEY:
 TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to-image"
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
 CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
+
+# 默认负面提示词
+DEFAULT_NEGATIVE_PROMPT = (
+    "low quality, blurry, distorted, deformed, bad anatomy, "
+    "mutated hands, extra fingers, missing fingers, bad proportions, "
+    "text, watermark, signature, logo"
+)
 # =====================
 
 HTML_PAGE = """
@@ -31,51 +38,28 @@ HTML_PAGE = """
     textarea { resize: vertical; line-height: 1.5; }
     input[type=button], input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
     
-    /* 参考图片缩略图（160x160） */
     img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
-    /* 生成结果缩略图（300x300） */
     img.result-thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
     
     .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
     
-    /* 预览项容器，用于定位删除按钮 */
-    .preview-item {
-      position: relative;
-      display: inline-block;
-    }
+    .preview-item { position: relative; display: inline-block; }
     .preview-item .delete-btn {
-      position: absolute;
-      top: 0;
-      right: 0;
-      background: rgba(255,0,0,0.7);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 22px;
-      height: 22px;
-      font-size: 14px;
-      line-height: 22px;
-      text-align: center;
-      cursor: pointer;
+      position: absolute; top: 0; right: 0;
+      background: rgba(255,0,0,0.7); color: white; border: none; border-radius: 50%;
+      width: 22px; height: 22px; font-size: 14px; line-height: 22px; text-align: center; cursor: pointer;
     }
     
-    /* 弹窗缩放核心样式 */
     .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
-    .modal img { 
-      max-width: 95vw; 
-      max-height: 95vh; 
-      transform-origin: center center;
-      transition: transform 0.1s ease;
-      user-select: none;
-    }
+    .modal img { max-width: 95vw; max-height: 95vh; transform-origin: center center; transition: transform 0.1s ease; user-select: none; }
+    
     #preview_section { margin: 12px 0; }
     #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
     #upload_section { display:none; margin: 8px 0; }
-    #size_section { display: inline-block; margin-right: 12px; }
+    #size_section, #num_section, #style_section, #steps_section { display: inline-block; margin-right: 12px; margin-top: 8px; }
     
-    /* 确认弹窗样式 */
     .confirm-dialog {
       display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%;
       background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
@@ -112,12 +96,33 @@ HTML_PAGE = """
       <option value="1024">1024x1024</option>
     </select>
   </div>
-  数量: 
-  <select name="num" id="num">
-    <option value="1" selected>1</option>
-    <option value="2">2</option>
-    <option value="3">3</option>
-  </select><br>
+  <div id="num_section">
+    数量: 
+    <select name="num" id="num">
+      <option value="1" selected>1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+    </select>
+  </div>
+  <div id="style_section">
+    风格: 
+    <select name="style" id="style">
+      <option value="realistic" selected>写实 (Realistic)</option>
+      <option value="anime">二次元 (Anime)</option>
+      <option value="digital-painting">数字绘画 (Digital Painting)</option>
+      <option value="oil-painting">油画 (Oil Painting)</option>
+      <option value="pixel-art">像素风 (Pixel Art)</option>
+    </select>
+  </div>
+  <div id="steps_section">
+    细节步数: 
+    <select name="steps" id="steps">
+      <option value="30" selected>30 - 快速生成</option>
+      <option value="50">50 - 标准细节</option>
+      <option value="100">100 - 高细节</option>
+    </select>
+  </div>
+  <br>
   <div id="upload_section">
     上传参考图片（可多张）: <input type="file" name="image_files" id="image_input" accept="image/*" multiple><br>
     <div id="preview_section">
@@ -132,7 +137,6 @@ HTML_PAGE = """
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
-<!-- 参考图片区域（服务器返回的，暂时保留） -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -142,7 +146,6 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
-<!-- 生成结果区域 -->
 {% if image_results %}
   <h3>生成结果:</h3>
   <div class="container">
@@ -161,12 +164,10 @@ HTML_PAGE = """
   <div class="error">{{ error }}</div>
 {% endif %}
 
-<!-- 图片放大弹窗 -->
 <div class="modal" id="modal" onclick="hideModal()">
   <img id="modalImg" src="">
 </div>
 
-<!-- 确认弹窗 -->
 <div class="confirm-dialog" id="confirm-dialog">
   <div class="confirm-box">
     <p>确认生成图片？<br>这将消耗一次额度</p>
@@ -176,7 +177,6 @@ HTML_PAGE = """
 </div>
 
 <script>
-// 缩放拖拽核心变量
 let currentScale = 1;
 let currentX = 0;
 let currentY = 0;
@@ -185,8 +185,6 @@ let startY = 0;
 let isDragging = false;
 const modal = document.getElementById('modal');
 const modalImg = document.getElementById('modalImg');
-
-// ---------- 全局文件数组 ----------
 let selectedFiles = [];
 
 function toggleMode() {
@@ -194,37 +192,29 @@ function toggleMode() {
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
 }
 
-// 重新渲染预览
 function renderPreview() {
     const container = document.getElementById('preview_container');
     container.innerHTML = '';
     if (selectedFiles.length === 0) return;
-    
     selectedFiles.forEach((file, index) => {
         const reader = new FileReader();
         reader.onload = function(e) {
             const itemDiv = document.createElement('div');
             itemDiv.className = 'preview-item';
-            
             const img = document.createElement('img');
             img.className = 'thumb';
             img.src = e.target.result;
             img.onclick = function() { showModal(this.src); };
-            
             const delBtn = document.createElement('span');
             delBtn.className = 'delete-btn';
             delBtn.innerHTML = '✕';
             delBtn.title = '删除此图片';
             delBtn.onclick = function(ev) {
                 ev.stopPropagation();
-                // 从数组中移除
                 selectedFiles.splice(index, 1);
-                // 重新渲染预览
                 renderPreview();
-                // 同步更新 file input（仅用于显示，实际提交用 FormData）
                 updateFileInput();
             };
-            
             itemDiv.appendChild(img);
             itemDiv.appendChild(delBtn);
             container.appendChild(itemDiv);
@@ -233,19 +223,15 @@ function renderPreview() {
     });
 }
 
-// 更新 file input 的 files（虽然提交时不依赖它，但为了可能的后备）
 function updateFileInput() {
     const dt = new DataTransfer();
     selectedFiles.forEach(f => dt.items.add(f));
     document.getElementById('image_input').files = dt.files;
 }
 
-// 监听文件选择
 document.getElementById('image_input').addEventListener('change', function(e) {
     const newFiles = Array.from(e.target.files);
-    // 合并到 selectedFiles（去重）
     newFiles.forEach(file => {
-        // 简单去重（根据名称和大小）
         const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size);
         if (!exists) selectedFiles.push(file);
     });
@@ -253,7 +239,6 @@ document.getElementById('image_input').addEventListener('change', function(e) {
     updateFileInput();
 });
 
-// ---------- 缩放拖拽相关（保持不变） ----------
 function showModal(src){
     modalImg.src = src;
     modal.style.display = 'flex';
@@ -262,9 +247,7 @@ function showModal(src){
     currentY = 0;
     updateTransform();
 }
-function hideModal(){
-    modal.style.display = 'none';
-}
+function hideModal(){ modal.style.display = 'none'; }
 function updateTransform() {
     modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
 }
@@ -272,11 +255,8 @@ function updateTransform() {
 modalImg.addEventListener('wheel', function(e) {
     e.preventDefault();
     const scaleStep = 0.1;
-    if (e.deltaY < 0) {
-        currentScale = Math.min(currentScale + scaleStep, 10);
-    } else {
-        currentScale = Math.max(currentScale - scaleStep, 0.5);
-    }
+    if (e.deltaY < 0) { currentScale = Math.min(currentScale + scaleStep, 10); }
+    else { currentScale = Math.max(currentScale - scaleStep, 0.5); }
     updateTransform();
 });
 
@@ -293,9 +273,7 @@ document.addEventListener('mousemove', function(e) {
     currentY = e.clientY - startY;
     updateTransform();
 });
-document.addEventListener('mouseup', function() {
-    isDragging = false;
-});
+document.addEventListener('mouseup', function() { isDragging = false; });
 
 modalImg.addEventListener('touchstart', function(e) {
     isDragging = true;
@@ -308,17 +286,13 @@ document.addEventListener('touchmove', function(e) {
     currentY = e.touches[0].clientY - startY;
     updateTransform();
 });
-document.addEventListener('touchend', function() {
-    isDragging = false;
-});
+document.addEventListener('touchend', function() { isDragging = false; });
 
 modal.addEventListener('click', function(e) {
-    if (e.target === modal) {
-        hideModal();
-    }
+    if (e.target === modal) { hideModal(); }
 });
 
-// ---------- 防误触确认流程 ----------
+// 确认弹窗
 document.getElementById('submit-btn').addEventListener('click', function() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
     if (mode === 'image2image') {
@@ -335,40 +309,20 @@ document.getElementById('confirm-yes').addEventListener('click', function() {
     var btn = document.getElementById('submit-btn');
     btn.value = '生成中…';
     btn.disabled = true;
-    
-    // 使用 FormData 提交，确保 selectedFiles 被发送
     var form = document.getElementById('main-form');
     var formData = new FormData(form);
-    // 清除原有的 image_files 字段（因为可能含有旧的文件）
     formData.delete('image_files');
-    // 将 selectedFiles 中的文件逐个添加
-    selectedFiles.forEach(file => {
-        formData.append('image_files', file);
-    });
-    
-    // 用 fetch 发送 POST 请求，然后刷新页面显示结果
-    fetch(form.action, {
-        method: 'POST',
-        body: formData
-    }).then(response => response.text())
-    .then(html => {
-        document.open();
-        document.write(html);
-        document.close();
-        // 恢复按钮状态（页面被替换，不需要重置）
-    }).catch(err => {
-        console.error(err);
-        btn.value = '生成图片';
-        btn.disabled = false;
-        alert('提交失败，请重试');
-    });
+    selectedFiles.forEach(file => { formData.append('image_files', file); });
+    fetch(form.action, { method: 'POST', body: formData })
+    .then(response => response.text())
+    .then(html => { document.open(); document.write(html); document.close(); })
+    .catch(err => { console.error(err); btn.value = '生成图片'; btn.disabled = false; alert('提交失败，请重试'); });
 });
 
 document.getElementById('confirm-no').addEventListener('click', function() {
     document.getElementById('confirm-dialog').style.display = 'none';
 });
 
-// 初始化显示
 toggleMode();
 </script>
 
@@ -463,21 +417,27 @@ def process_generated_output(raw_output):
     return {"display_url": display_url, "catbox_url": catbox_url}
 
 
-def generate_images(mode, prompt, size, num, image_files):
+def generate_images(mode, prompt, size, num, style, steps, image_files):
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
+    payload_base = {
+        "output_format": "png",
+        "size": f"{size}x{size}",
+        "num_outputs": num,
+        "style": style,
+        "steps": steps,
+        "negative_prompt": DEFAULT_NEGATIVE_PROMPT
+    }
+
     if mode == "text2image":
         url = TEXT2IMAGE_URL
+        payload = {"prompt": prompt, **payload_base}
+        # 文生图不需要 images 字段
         results = []
         for i in range(num):
-            payload = {
-                "prompt": prompt,
-                "aspect_ratio": "1:1",
-                "output_format": "png"
-            }
             print(f"尝试生成第 {i+1} 张图片（文生图），prompt: {prompt}")
             try:
                 response = requests.post(url, json=payload, headers=headers, timeout=30)
@@ -515,15 +475,7 @@ def generate_images(mode, prompt, size, num, image_files):
             img_url = upload_to_catbox(f)
             image_url_list.append(img_url)
 
-        size = f"{size}x{size}"
-
-        payload = {
-            "prompt": prompt,
-            "images": image_url_list,
-            "output_format": "png",
-            "size": size,
-            "num_outputs": num
-        }
+        payload = {"prompt": prompt, "images": image_url_list, **payload_base}
 
         print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
         try:
@@ -569,13 +521,14 @@ def index():
         prompt = request.form["prompt"]
         size = request.form.get("size", "512")
         num = int(request.form.get("num", "1"))
+        style = request.form.get("style", "realistic")
+        steps = int(request.form.get("steps", "30"))
         image_files = []
         loading = True
-        print(f"收到请求: mode={mode}, prompt={prompt}, size={size}, num={num}")
+        print(f"收到请求: mode={mode}, prompt={prompt}, size={size}, num={num}, style={style}, steps={steps}")
 
         if mode == "image2image":
             image_files = request.files.getlist("image_files")
-            # 预览用（服务器端返回后不再需要，但保留兼容）
             for f in image_files:
                 f.seek(0)
                 content = f.read()
@@ -583,7 +536,7 @@ def index():
                 f.seek(0)
 
         try:
-            image_results = generate_images(mode, prompt, size, num, image_files)
+            image_results = generate_images(mode, prompt, size, num, style, steps, image_files)
         except Exception as e:
             error_msg = f"生成失败: {e}"
             print(f"最终错误: {error_msg}")
@@ -597,3 +550,4 @@ def index():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+    
