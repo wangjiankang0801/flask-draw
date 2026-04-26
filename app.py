@@ -26,20 +26,27 @@ HTML_PAGE = """
   <link rel="icon" href="data:,">
   <style>
     body { font-family: Arial; margin: 20px; }
-    /* 适配多行prompt输入框的样式 */
     input[type=text], textarea, select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
-    /* 隐藏文件选择框的文件名，只保留按钮 */
     input[type=file] { color: transparent; width: auto; }
     textarea { resize: vertical; line-height: 1.5; }
     input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    /* 放大缩略图，适配一行5张的尺寸 */
-    img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 4px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
-    /* 调整缩略图容器，增加留白和间距 */
+    /* 放大缩略图默认尺寸，可自行修改宽高数值调整大小 */
+    img.thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
     .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
-    .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; }
-    .modal img { max-width:90%; max-height:90%; }
+    /* 弹窗缩放核心样式 */
+    .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
+    .modal img { 
+      max-width: 95vw; 
+      max-height: 95vh; 
+      transform-origin: center center;
+      transition: transform 0.1s ease;
+      user-select: none;
+    }
+    /* 选择文件即时预览区域样式 */
+    #preview_section { margin: 12px 0; }
+    #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
     #upload_section { display:none; margin: 8px 0; }
     #size_section { display: inline-block; margin-right: 12px; }
   </style>
@@ -55,11 +62,9 @@ HTML_PAGE = """
     <input type="radio" name="mode" value="image2image" onchange="toggleMode()"> 图生图
   </label>
   <br><br>
-  <!-- 需求1：改成5行高度的多行输入框 -->
   Prompt: <br>
   <textarea name="prompt" rows="5" maxlength="200" placeholder="输入你的创意提示" required></textarea>
   <br>
-  <!-- 需求2：尺寸选择框全程保留，两个模式都可见 -->
   <div id="size_section">
     尺寸: 
     <select name="size">
@@ -75,19 +80,21 @@ HTML_PAGE = """
     <option value="3">3</option>
   </select><br>
   <div id="upload_section">
-    上传参考图片（可多张）: <input type="file" name="image_files" accept="image/*" multiple><br>
+    上传参考图片（可多张）: <input type="file" name="image_files" id="image_input" accept="image/*" multiple><br>
+    <!-- 新增选择文件即时预览容器 -->
+    <div id="preview_section">
+      <div id="preview_container"></div>
+    </div>
   </div>
   <br>
   <input type="submit" value="生成图片">
 </form>
 
-<!-- 以下三个区块由后端动态填充 -->
-<!-- 1. 加载提示 -->
 {% if loading %}
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
-<!-- 2. 参考图片缩略图（图生图模式） -->
+<!-- 参考图片区域，使用与生成结果相同的 thumb 类 -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -97,7 +104,6 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
-<!-- 3. 生成结果缩略图 -->
 {% if image_urls %}
   <h3>生成结果:</h3>
   <div class="container">
@@ -107,30 +113,132 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
-<!-- 错误提示 -->
 {% if error %}
   <div class="error">{{ error }}</div>
 {% endif %}
 
-<!-- 图片预览弹窗 -->
 <div class="modal" id="modal" onclick="hideModal()">
   <img id="modalImg" src="">
 </div>
 
 <script>
+// 缩放拖拽核心变量
+let currentScale = 1;
+let currentX = 0;
+let currentY = 0;
+let startX = 0;
+let startY = 0;
+let isDragging = false;
+const modal = document.getElementById('modal');
+const modalImg = document.getElementById('modalImg');
+
+// 文生图/图生图模式切换
 function toggleMode() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
-    // 仅控制上传区域显示，尺寸区域全程保留，满足需求2
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
 }
+
+// 选择文件后即时预览大图
+document.getElementById('image_input').addEventListener('change', function(e) {
+    const previewContainer = document.getElementById('preview_container');
+    previewContainer.innerHTML = ''; // 清空历史预览
+    const files = e.target.files;
+    
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file.type.startsWith('image/')) continue;
+        
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            // 生成和提交后一致尺寸的预览图
+            const img = document.createElement('img');
+            img.className = 'thumb';
+            img.src = event.target.result;
+            img.onclick = function() { showModal(this.src); };
+            previewContainer.appendChild(img);
+        };
+        reader.readAsDataURL(file);
+    }
+});
+
+// 打开弹窗并重置缩放状态
 function showModal(src){
-    document.getElementById('modalImg').src = src;
-    document.getElementById('modal').style.display='flex';
+    modalImg.src = src;
+    modal.style.display = 'flex';
+    // 每次打开重置缩放和位移
+    currentScale = 1;
+    currentX = 0;
+    currentY = 0;
+    updateTransform();
 }
+
+// 关闭弹窗
 function hideModal(){
-    document.getElementById('modal').style.display='none';
+    modal.style.display = 'none';
 }
-// 页面初始化时按默认模式设置显示
+
+// 更新图片缩放/位移状态
+function updateTransform() {
+    modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
+}
+
+// 鼠标滚轮缩放（最大10倍，最小0.5倍）
+modalImg.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const scaleStep = 0.1;
+    if (e.deltaY < 0) {
+        currentScale = Math.min(currentScale + scaleStep, 10);
+    } else {
+        currentScale = Math.max(currentScale - scaleStep, 0.5);
+    }
+    updateTransform();
+});
+
+// 鼠标拖拽移动图片
+modalImg.addEventListener('mousedown', function(e) {
+    e.preventDefault();
+    isDragging = true;
+    startX = e.clientX - currentX;
+    startY = e.clientY - currentY;
+});
+
+document.addEventListener('mousemove', function(e) {
+    if (!isDragging) return;
+    e.preventDefault();
+    currentX = e.clientX - startX;
+    currentY = e.clientY - startY;
+    updateTransform();
+});
+
+document.addEventListener('mouseup', function() {
+    isDragging = false;
+});
+
+// 移动端触摸拖拽适配
+modalImg.addEventListener('touchstart', function(e) {
+    isDragging = true;
+    startX = e.touches[0].clientX - currentX;
+    startY = e.touches[0].clientY - currentY;
+});
+
+document.addEventListener('touchmove', function(e) {
+    if (!isDragging) return;
+    currentX = e.touches[0].clientX - startX;
+    currentY = e.touches[0].clientY - startY;
+    updateTransform();
+});
+
+document.addEventListener('touchend', function() {
+    isDragging = false;
+});
+
+// 点击弹窗背景关闭
+modal.addEventListener('click', function(e) {
+    if (e.target === modal) {
+        hideModal();
+    }
+});
+
 toggleMode();
 </script>
 
@@ -145,7 +253,6 @@ def upload_to_catbox(file):
     file.seek(0)
     original_size = len(content)
 
-    # 如果 > 1MB 自动压缩（catbox 限制 200MB，但压缩可提速）
     if original_size > 1 * 1024 * 1024:
         try:
             from PIL import Image
@@ -165,7 +272,6 @@ def upload_to_catbox(file):
 
     try:
         resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
-        print(f"catbox 响应状态码: {resp.status_code}")
         if resp.status_code != 200:
             print(f"catbox 错误响应: {resp.text}")
             resp.raise_for_status()
@@ -201,25 +307,20 @@ def generate_images(mode, prompt, size, num, image_files):
                 response.raise_for_status()
                 data = response.json()["data"]
                 get_url = data["urls"]["get"]
-                print(f"获取到查询URL: {get_url}")
 
                 while True:
                     r = requests.get(get_url, headers=headers)
                     r.raise_for_status()
                     j = r.json()
                     status = j["data"]["status"]
-                    print("轮询状态:", status)
                     if status == "completed":
                         image_url = j["data"]["outputs"][0]
-                        print(f"图片URL前100字符: {str(image_url)[:100]}")
                         if image_url and not image_url.startswith('data:') and not image_url.startswith('http'):
                             image_url = "data:image/png;base64," + image_url
-                            print("已补全 base64 前缀")
                         image_urls.append(image_url)
                         break
                     elif status == "failed":
                         error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
-                        print(f"文生图失败，完整响应: {j}")
                         raise Exception(f"生成失败: {error_detail}")
                     time.sleep(2)
             except Exception as e:
@@ -237,9 +338,6 @@ def generate_images(mode, prompt, size, num, image_files):
             img_url = upload_to_catbox(f)
             image_url_list.append(img_url)
 
-        print(f"catbox 上传完成，共 {len(image_url_list)} 个链接")
-
-        # 修正 size 格式：将 "512" 改为 "512x512"
         size = f"{size}x{size}"
 
         payload = {
@@ -250,13 +348,11 @@ def generate_images(mode, prompt, size, num, image_files):
             "num_outputs": num
         }
 
-        print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
         try:
             response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
         except Exception as e:
             print(f"图生图 POST 请求失败: {e}")
             raise
-        print(f"图生图 POST 响应状态码: {response.status_code}")
         if response.status_code != 200:
             print(f"错误响应: {response.text}")
             response.raise_for_status()
@@ -265,14 +361,12 @@ def generate_images(mode, prompt, size, num, image_files):
         if not data:
             raise Exception(f"响应中没有 data: {response.json()}")
         get_url = data["urls"]["get"]
-        print(f"获取到查询URL: {get_url}")
 
         while True:
             r = requests.get(get_url, headers=headers)
             r.raise_for_status()
             j = r.json()
             status = j.get("data", {}).get("status")
-            print("轮询状态:", status)
 
             if status == "completed":
                 outputs = j["data"]["outputs"]
@@ -280,16 +374,12 @@ def generate_images(mode, prompt, size, num, image_files):
                 for image_url in outputs:
                     if image_url and not image_url.startswith("data:") and not image_url.startswith("http"):
                         image_url = "data:image/png;base64," + image_url
-                        print("已补全 base64 前缀")
                     image_urls.append(image_url)
                 return image_urls
 
             elif status == "failed":
-                print("图生图失败，完整响应:", j)
                 error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
                 raise Exception(f"生成失败: {error_detail}")
-            else:
-                pass
             time.sleep(2)
 
 
