@@ -30,11 +30,16 @@ HTML_PAGE = """
     input[type=file] { color: transparent; width: auto; }
     textarea { resize: vertical; line-height: 1.5; }
     input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    /* 放大缩略图默认尺寸，可自行修改宽高数值调整大小 */
-    img.thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
+    
+    /* 参考图片缩略图（160x160） */
+    img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
+    /* 生成结果缩略图（300x300） */
+    img.result-thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
+    
     .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
     .error { color: red; margin-top: 10px; }
     .loading { color: blue; margin-top: 10px; }
+    
     /* 弹窗缩放核心样式 */
     .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
     .modal img { 
@@ -44,7 +49,6 @@ HTML_PAGE = """
       transition: transform 0.1s ease;
       user-select: none;
     }
-    /* 选择文件即时预览区域样式 */
     #preview_section { margin: 12px 0; }
     #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
     #upload_section { display:none; margin: 8px 0; }
@@ -81,7 +85,7 @@ HTML_PAGE = """
   </select><br>
   <div id="upload_section">
     上传参考图片（可多张）: <input type="file" name="image_files" id="image_input" accept="image/*" multiple><br>
-    <!-- 新增选择文件即时预览容器 -->
+    <!-- 即时预览容器（使用 thumb 类，160x160） -->
     <div id="preview_section">
       <div id="preview_container"></div>
     </div>
@@ -94,7 +98,7 @@ HTML_PAGE = """
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
-<!-- 参考图片区域，使用与生成结果相同的 thumb 类 -->
+<!-- 参考图片区域，使用 thumb 类（160x160） -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -104,11 +108,12 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
+<!-- 生成结果区域，使用 result-thumb 类（300x300） -->
 {% if image_urls %}
   <h3>生成结果:</h3>
   <div class="container">
   {% for url in image_urls %}
-    <img class="thumb" src="{{ url }}" onclick="showModal(this.src)">
+    <img class="result-thumb" src="{{ url }}" onclick="showModal(this.src)">
   {% endfor %}
   </div>
 {% endif %}
@@ -138,10 +143,10 @@ function toggleMode() {
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
 }
 
-// 选择文件后即时预览大图
+// 选择文件后即时预览（使用 thumb 类，160x160）
 document.getElementById('image_input').addEventListener('change', function(e) {
     const previewContainer = document.getElementById('preview_container');
-    previewContainer.innerHTML = ''; // 清空历史预览
+    previewContainer.innerHTML = '';
     const files = e.target.files;
     
     for (let i = 0; i < files.length; i++) {
@@ -150,9 +155,8 @@ document.getElementById('image_input').addEventListener('change', function(e) {
         
         const reader = new FileReader();
         reader.onload = function(event) {
-            // 生成和提交后一致尺寸的预览图
             const img = document.createElement('img');
-            img.className = 'thumb';
+            img.className = 'thumb';  // 参考图片尺寸 160x160
             img.src = event.target.result;
             img.onclick = function() { showModal(this.src); };
             previewContainer.appendChild(img);
@@ -165,24 +169,21 @@ document.getElementById('image_input').addEventListener('change', function(e) {
 function showModal(src){
     modalImg.src = src;
     modal.style.display = 'flex';
-    // 每次打开重置缩放和位移
     currentScale = 1;
     currentX = 0;
     currentY = 0;
     updateTransform();
 }
 
-// 关闭弹窗
 function hideModal(){
     modal.style.display = 'none';
 }
 
-// 更新图片缩放/位移状态
 function updateTransform() {
     modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
 }
 
-// 鼠标滚轮缩放（最大10倍，最小0.5倍）
+// 滚轮缩放
 modalImg.addEventListener('wheel', function(e) {
     e.preventDefault();
     const scaleStep = 0.1;
@@ -194,7 +195,7 @@ modalImg.addEventListener('wheel', function(e) {
     updateTransform();
 });
 
-// 鼠标拖拽移动图片
+// 鼠标拖拽
 modalImg.addEventListener('mousedown', function(e) {
     e.preventDefault();
     isDragging = true;
@@ -214,7 +215,7 @@ document.addEventListener('mouseup', function() {
     isDragging = false;
 });
 
-// 移动端触摸拖拽适配
+// 移动端触摸
 modalImg.addEventListener('touchstart', function(e) {
     isDragging = true;
     startX = e.touches[0].clientX - currentX;
@@ -232,7 +233,7 @@ document.addEventListener('touchend', function() {
     isDragging = false;
 });
 
-// 点击弹窗背景关闭
+// 点击背景关闭
 modal.addEventListener('click', function(e) {
     if (e.target === modal) {
         hideModal();
