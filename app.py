@@ -29,7 +29,7 @@ HTML_PAGE = """
     input[type=text], textarea, select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
     input[type=file] { color: transparent; width: auto; }
     textarea { resize: vertical; line-height: 1.5; }
-    input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
+    input[type=button], input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
     
     /* 参考图片缩略图（160x160） */
     img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
@@ -53,12 +53,26 @@ HTML_PAGE = """
     #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
     #upload_section { display:none; margin: 8px 0; }
     #size_section { display: inline-block; margin-right: 12px; }
+    
+    /* 确认弹窗样式 */
+    .confirm-dialog {
+      display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
+    }
+    .confirm-box {
+      background: white; padding: 20px; border-radius: 10px; text-align: center; max-width: 300px;
+    }
+    .confirm-box button { margin: 10px 5px; padding: 8px 20px; font-size: 16px; }
+    .btn-generate { background: #007bff; color: white; border: none; }
+    .btn-cancel { background: #ccc; border: none; }
+    
+    .catbox-link { font-size: 12px; word-break: break-all; display: block; margin-top: 4px; color: #666; }
   </style>
 </head>
 <body>
 <h2>GPTs AI 画图（文生图 / 图生图）</h2>
 
-<form method="post" action="/" enctype="multipart/form-data">
+<form id="main-form" method="post" action="/" enctype="multipart/form-data">
   <label>
     <input type="radio" name="mode" value="text2image" checked onchange="toggleMode()"> 文生图
   </label>
@@ -67,38 +81,37 @@ HTML_PAGE = """
   </label>
   <br><br>
   Prompt: <br>
-  <textarea name="prompt" rows="5" maxlength="200" placeholder="输入你的创意提示" required></textarea>
+  <textarea name="prompt" id="prompt" rows="5" maxlength="200" placeholder="输入你的创意提示" required></textarea>
   <br>
   <div id="size_section">
     尺寸: 
-    <select name="size">
+    <select name="size" id="size">
       <option value="256">256x256</option>
       <option value="512" selected>512x512</option>
       <option value="1024">1024x1024</option>
     </select>
   </div>
   数量: 
-  <select name="num">
+  <select name="num" id="num">
     <option value="1" selected>1</option>
     <option value="2">2</option>
     <option value="3">3</option>
   </select><br>
   <div id="upload_section">
     上传参考图片（可多张）: <input type="file" name="image_files" id="image_input" accept="image/*" multiple><br>
-    <!-- 即时预览容器（使用 thumb 类，160x160） -->
     <div id="preview_section">
       <div id="preview_container"></div>
     </div>
   </div>
   <br>
-  <input type="submit" value="生成图片">
+  <input type="button" id="submit-btn" value="生成图片">
 </form>
 
 {% if loading %}
   <div class="loading">正在生成，请稍候…</div>
 {% endif %}
 
-<!-- 参考图片区域，使用 thumb 类（160x160） -->
+<!-- 参考图片区域（使用 thumb 类，160x160） -->
 {% if uploaded_images %}
   <h3>参考图片:</h3>
   <div class="container">
@@ -108,12 +121,17 @@ HTML_PAGE = """
   </div>
 {% endif %}
 
-<!-- 生成结果区域，使用 result-thumb 类（300x300） -->
-{% if image_urls %}
+<!-- 生成结果区域（使用 result-thumb 类，300x300，附带永久链接） -->
+{% if image_results %}
   <h3>生成结果:</h3>
   <div class="container">
-  {% for url in image_urls %}
-    <img class="result-thumb" src="{{ url }}" onclick="showModal(this.src)">
+  {% for item in image_results %}
+    <div class="result-item">
+      <img class="result-thumb" src="{{ item.display_url }}" onclick="showModal(this.src)">
+      {% if item.catbox_url %}
+        <a class="catbox-link" href="{{ item.catbox_url }}" target="_blank">🔗 永久链接</a>
+      {% endif %}
+    </div>
   {% endfor %}
   </div>
 {% endif %}
@@ -122,8 +140,18 @@ HTML_PAGE = """
   <div class="error">{{ error }}</div>
 {% endif %}
 
+<!-- 图片放大弹窗（保留原有缩放拖拽功能） -->
 <div class="modal" id="modal" onclick="hideModal()">
   <img id="modalImg" src="">
+</div>
+
+<!-- 确认弹窗 -->
+<div class="confirm-dialog" id="confirm-dialog">
+  <div class="confirm-box">
+    <p>确认生成图片？<br>这将消耗一次额度</p>
+    <button class="btn-generate" id="confirm-yes">确认生成</button>
+    <button class="btn-cancel" id="confirm-no">取消</button>
+  </div>
 </div>
 
 <script>
@@ -137,26 +165,23 @@ let isDragging = false;
 const modal = document.getElementById('modal');
 const modalImg = document.getElementById('modalImg');
 
-// 文生图/图生图模式切换
 function toggleMode() {
     var mode = document.querySelector('input[name="mode"]:checked').value;
     document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
 }
 
-// 选择文件后即时预览（使用 thumb 类，160x160）
+// 即时预览
 document.getElementById('image_input').addEventListener('change', function(e) {
     const previewContainer = document.getElementById('preview_container');
     previewContainer.innerHTML = '';
     const files = e.target.files;
-    
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (!file.type.startsWith('image/')) continue;
-        
         const reader = new FileReader();
         reader.onload = function(event) {
             const img = document.createElement('img');
-            img.className = 'thumb';  // 参考图片尺寸 160x160
+            img.className = 'thumb';
             img.src = event.target.result;
             img.onclick = function() { showModal(this.src); };
             previewContainer.appendChild(img);
@@ -165,7 +190,6 @@ document.getElementById('image_input').addEventListener('change', function(e) {
     }
 });
 
-// 打开弹窗并重置缩放状态
 function showModal(src){
     modalImg.src = src;
     modal.style.display = 'flex';
@@ -174,11 +198,9 @@ function showModal(src){
     currentY = 0;
     updateTransform();
 }
-
 function hideModal(){
     modal.style.display = 'none';
 }
-
 function updateTransform() {
     modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
 }
@@ -202,7 +224,6 @@ modalImg.addEventListener('mousedown', function(e) {
     startX = e.clientX - currentX;
     startY = e.clientY - currentY;
 });
-
 document.addEventListener('mousemove', function(e) {
     if (!isDragging) return;
     e.preventDefault();
@@ -210,7 +231,6 @@ document.addEventListener('mousemove', function(e) {
     currentY = e.clientY - startY;
     updateTransform();
 });
-
 document.addEventListener('mouseup', function() {
     isDragging = false;
 });
@@ -221,25 +241,49 @@ modalImg.addEventListener('touchstart', function(e) {
     startX = e.touches[0].clientX - currentX;
     startY = e.touches[0].clientY - currentY;
 });
-
 document.addEventListener('touchmove', function(e) {
     if (!isDragging) return;
     currentX = e.touches[0].clientX - startX;
     currentY = e.touches[0].clientY - startY;
     updateTransform();
 });
-
 document.addEventListener('touchend', function() {
     isDragging = false;
 });
 
-// 点击背景关闭
 modal.addEventListener('click', function(e) {
     if (e.target === modal) {
         hideModal();
     }
 });
 
+// ---------- 防误触确认流程 ----------
+document.getElementById('submit-btn').addEventListener('click', function() {
+    var mode = document.querySelector('input[name="mode"]:checked').value;
+    if (mode === 'image2image') {
+        var files = document.getElementById('image_input').files;
+        if (files.length === 0) {
+            alert("请先上传参考图片再生成");
+            return;
+        }
+    }
+    // 显示确认弹窗
+    document.getElementById('confirm-dialog').style.display = 'flex';
+});
+
+document.getElementById('confirm-yes').addEventListener('click', function() {
+    document.getElementById('confirm-dialog').style.display = 'none';
+    var btn = document.getElementById('submit-btn');
+    btn.value = '生成中…';
+    btn.disabled = true;
+    document.getElementById('main-form').submit();
+});
+
+document.getElementById('confirm-no').addEventListener('click', function() {
+    document.getElementById('confirm-dialog').style.display = 'none';
+});
+
+// 初始化显示
 toggleMode();
 </script>
 
@@ -248,8 +292,29 @@ toggleMode();
 """
 
 
+def upload_bytes_to_catbox(img_bytes, filename="generated.png"):
+    """将图片字节上传到 catbox.moe，返回直链"""
+    files = {"fileToUpload": (filename, img_bytes, "image/png")}
+    data = {"reqtype": "fileupload"}
+    try:
+        resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
+        if resp.status_code != 200:
+            print(f"catbox 备份上传失败: {resp.text}")
+            return None
+        url = resp.text.strip()
+        if url.startswith("http"):
+            print(f"图片已备份到 catbox: {url}")
+            return url
+        else:
+            print(f"catbox 返回异常: {url}")
+            return None
+    except Exception as e:
+        print(f"备份上传异常: {e}")
+        return None
+
+
 def upload_to_catbox(file):
-    """上传图片到 catbox.moe，返回直链"""
+    """上传参考图片到 catbox.moe，返回直链"""
     content = file.read()
     file.seek(0)
     original_size = len(content)
@@ -287,6 +352,37 @@ def upload_to_catbox(file):
         raise
 
 
+def process_generated_output(raw_output):
+    """处理生成的单个输出，返回 {'display_url': ..., 'catbox_url': ...}"""
+    display_url = raw_output
+    # 补全 base64 前缀
+    if display_url and not display_url.startswith('data:') and not display_url.startswith('http'):
+        display_url = "data:image/png;base64," + display_url
+
+    # 提取图片字节数据
+    img_bytes = None
+    if raw_output.startswith('data:image/png;base64,'):
+        b64_data = raw_output[len('data:image/png;base64,'):]
+        img_bytes = base64.b64decode(b64_data)
+    elif not raw_output.startswith('http'):
+        # 纯 base64
+        img_bytes = base64.b64decode(raw_output)
+    else:
+        # 是普通 URL，尝试下载
+        try:
+            resp = requests.get(raw_output, timeout=30)
+            resp.raise_for_status()
+            img_bytes = resp.content
+        except Exception as e:
+            print(f"下载生成图片失败: {e}")
+
+    # 上传到 catbox 备份
+    catbox_url = None
+    if img_bytes:
+        catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
+    return {"display_url": display_url, "catbox_url": catbox_url}
+
+
 def generate_images(mode, prompt, size, num, image_files):
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -295,7 +391,7 @@ def generate_images(mode, prompt, size, num, image_files):
 
     if mode == "text2image":
         url = TEXT2IMAGE_URL
-        image_urls = []
+        results = []
         for i in range(num):
             payload = {
                 "prompt": prompt,
@@ -308,17 +404,18 @@ def generate_images(mode, prompt, size, num, image_files):
                 response.raise_for_status()
                 data = response.json()["data"]
                 get_url = data["urls"]["get"]
+                print(f"获取到查询URL: {get_url}")
 
                 while True:
                     r = requests.get(get_url, headers=headers)
                     r.raise_for_status()
                     j = r.json()
                     status = j["data"]["status"]
+                    print("轮询状态:", status)
                     if status == "completed":
-                        image_url = j["data"]["outputs"][0]
-                        if image_url and not image_url.startswith('data:') and not image_url.startswith('http'):
-                            image_url = "data:image/png;base64," + image_url
-                        image_urls.append(image_url)
+                        output = j["data"]["outputs"][0]
+                        result_item = process_generated_output(output)
+                        results.append(result_item)
                         break
                     elif status == "failed":
                         error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
@@ -327,7 +424,7 @@ def generate_images(mode, prompt, size, num, image_files):
             except Exception as e:
                 print(f"文生图第 {i+1} 张出错: {e}")
                 raise
-        return image_urls
+        return results
 
     else:  # image2image
         if not image_files:
@@ -349,11 +446,13 @@ def generate_images(mode, prompt, size, num, image_files):
             "num_outputs": num
         }
 
+        print(f"发起图生图请求，prompt: {prompt}, images: {image_url_list}")
         try:
             response = requests.post(IMAGE_EDIT_URL, json=payload, headers=headers, timeout=60)
         except Exception as e:
             print(f"图生图 POST 请求失败: {e}")
             raise
+        print(f"图生图 POST 响应状态码: {response.status_code}")
         if response.status_code != 200:
             print(f"错误响应: {response.text}")
             response.raise_for_status()
@@ -362,22 +461,21 @@ def generate_images(mode, prompt, size, num, image_files):
         if not data:
             raise Exception(f"响应中没有 data: {response.json()}")
         get_url = data["urls"]["get"]
+        print(f"获取到查询URL: {get_url}")
 
         while True:
             r = requests.get(get_url, headers=headers)
             r.raise_for_status()
             j = r.json()
             status = j.get("data", {}).get("status")
-
+            print("轮询状态:", status)
             if status == "completed":
                 outputs = j["data"]["outputs"]
-                image_urls = []
-                for image_url in outputs:
-                    if image_url and not image_url.startswith("data:") and not image_url.startswith("http"):
-                        image_url = "data:image/png;base64," + image_url
-                    image_urls.append(image_url)
-                return image_urls
-
+                results = []
+                for output in outputs:
+                    result_item = process_generated_output(output)
+                    results.append(result_item)
+                return results
             elif status == "failed":
                 error_detail = j.get("data", {}).get("error") or j.get("error") or "未知错误"
                 raise Exception(f"生成失败: {error_detail}")
@@ -387,7 +485,7 @@ def generate_images(mode, prompt, size, num, image_files):
 @app.route("/", methods=["GET", "POST"])
 def index():
     uploaded_images = []
-    image_urls = None
+    image_results = None
     error_msg = None
     loading = False
     if request.method == "POST":
@@ -408,13 +506,13 @@ def index():
                 f.seek(0)
 
         try:
-            image_urls = generate_images(mode, prompt, size, num, image_files)
+            image_results = generate_images(mode, prompt, size, num, image_files)
         except Exception as e:
             error_msg = f"生成失败: {e}"
             print(f"最终错误: {error_msg}")
 
     return render_template_string(HTML_PAGE,
-                                  image_urls=image_urls,
+                                  image_results=image_results,
                                   error=error_msg,
                                   loading=loading,
                                   uploaded_images=uploaded_images)
