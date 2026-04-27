@@ -4,11 +4,14 @@ import base64
 import re
 import json
 import requests
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, jsonify
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-# ===== 图像 API 设置 =====
+# ===================================================================
+# 配置常量（从环境变量读取）
+# ===================================================================
 API_KEY = os.environ.get("API_KEY")
 if not API_KEY:
     raise RuntimeError("请设置环境变量 API_KEY")
@@ -17,12 +20,10 @@ TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
 CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 
-# ===== 大模型 API 设置（DeepSeek-V3） =====
-LLM_API_KEY = os.environ.get("LLM_API_KEY")          # 百度千帆的 API Key
+# 大模型 API 配置
+LLM_API_KEY = os.environ.get("LLM_API_KEY")
 LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://qianfan.baidubce.com/v2/chat/completions")
 LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v3.1-250821")
-
-# 如果未设置大模型密钥，则禁用优化功能
 ENABLE_LLM_OPT = bool(LLM_API_KEY)
 
 DEFAULT_NEGATIVE_PROMPT = (
@@ -31,72 +32,9 @@ DEFAULT_NEGATIVE_PROMPT = (
     "text, watermark, signature, logo"
 )
 
-# ===== 大模型调用函数 =====
-def call_llm_for_optimization(user_prompt: str):
-    """
-    调用大模型，返回优化后的参数。
-    返回格式：{"optimized_prompt": str, "style": str, "size": int, "steps": int}
-    """
-    system_prompt = """你是一个专业的绘画提示词优化助手。
-用户输入一句大白话，你需要将它转换成适合高质量图像生成的参数。
-
-请严格按照以下JSON格式输出，不要有任何额外文字：
-{
-    "optimized_prompt": "优化后的英文或中文绘画描述，需结构清晰、细节丰富",
-    "style": "一种风格，可选值：realistic, anime, digital-painting, oil-painting, pixel-art",
-    "size": 尺寸数字，仅允许 256, 512, 1024 中的一个，
-    "steps": 步数，仅允许 30, 50, 100 中的一个
-}
-
-示例：
-用户输入："一只可爱的猫"
-输出：
-{
-    "optimized_prompt": "一只可爱的猫，毛茸茸的，大眼睛，好奇的表情，柔和的自然光，高细节，4K",
-    "style": "realistic",
-    "size": 512,
-    "steps": 50
-}
-"""
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LLM_API_KEY}"
-    }
-    payload = {
-        "model": LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "temperature": 0.2,
-        "max_tokens": 300
-    }
-    try:
-        resp = requests.post(LLM_BASE_URL, json=payload, headers=headers, timeout=20)
-        resp.raise_for_status()
-        result = resp.json()
-        content = result["choices"][0]["message"]["content"]
-        # 提取JSON
-        json_match = re.search(r'\{.*\}', content, re.DOTALL)
-        if json_match:
-            params = json.loads(json_match.group())
-            # 校验并修正值
-            allowed_styles = ["realistic", "anime", "digital-painting", "oil-painting", "pixel-art"]
-            if params.get("style") not in allowed_styles:
-                params["style"] = "realistic"
-            if params.get("size") not in [256, 512, 1024]:
-                params["size"] = 512
-            if params.get("steps") not in [30, 50, 100]:
-                params["steps"] = 50
-            return params
-        else:
-            print("大模型返回未包含JSON，使用原始prompt")
-            return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30}
-    except Exception as e:
-        print(f"调用大模型失败：{e}，使用原始参数")
-        return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30}
-
-# ===== 原有函数（上传、生成等）保持不变 =====
+# ===================================================================
+# 辅助函数：Catbox 上传
+# ===================================================================
 def upload_bytes_to_catbox(img_bytes, filename="generated.png"):
     files = {"fileToUpload": (filename, img_bytes, "image/png")}
     data = {"reqtype": "fileupload"}
@@ -107,7 +45,6 @@ def upload_bytes_to_catbox(img_bytes, filename="generated.png"):
             return None
         url = resp.text.strip()
         if url.startswith("http"):
-            print(f"图片已备份到 catbox: {url}")
             return url
         else:
             print(f"catbox 返回异常: {url}")
@@ -137,12 +74,9 @@ def upload_to_catbox(file):
     data = {"reqtype": "fileupload"}
     try:
         resp = requests.post(CATBOX_UPLOAD_URL, files=files, data=data, timeout=60)
-        if resp.status_code != 200:
-            print(f"catbox 错误响应: {resp.text}")
-            resp.raise_for_status()
+        resp.raise_for_status()
         url = resp.text.strip()
         if url.startswith("http"):
-            print(f"上传成功: {url}")
             return url
         else:
             raise Exception(f"返回格式异常: {url}")
@@ -150,6 +84,9 @@ def upload_to_catbox(file):
         print(f"catbox 上传异常: {e}")
         raise
 
+# ===================================================================
+# 图像生成后的输出处理
+# ===================================================================
 def process_generated_output(raw_output):
     display_url = raw_output
     if display_url and not display_url.startswith('data:') and not display_url.startswith('http'):
@@ -172,6 +109,9 @@ def process_generated_output(raw_output):
         catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
     return {"display_url": display_url, "catbox_url": catbox_url}
 
+# ===================================================================
+# 核心图像生成逻辑（文生图 / 图生图）
+# ===================================================================
 def generate_images(mode, prompt, size, num, style, steps, image_files):
     headers = {
         "Authorization": f"Bearer {API_KEY}",
@@ -253,365 +193,485 @@ def generate_images(mode, prompt, size, num, style, steps, image_files):
                 raise Exception(f"生成失败: {error_detail}")
             time.sleep(2)
 
-# ===== HTML 模板（与原来几乎一样，但可以增加提示信息） =====
+# ===================================================================
+# 大模型调用函数（智能优化用户输入）
+# ===================================================================
+def call_llm_for_optimization(user_prompt: str, mode: str):
+    """
+    调用大模型，返回优化后的参数。
+    返回格式：{"optimized_prompt": str, "style": str, "size": int, "steps": int, "num": int}
+    """
+    system_prompt = f"""你是一个专业的绘画提示词优化助手。
+用户输入一句大白话，你需要将它转换成适合高质量图像生成的参数。
+当前模式：{mode}（text2image 或 image2image）。
+
+请严格按照以下JSON格式输出，不要有任何额外文字：
+{{
+    "optimized_prompt": "优化后的英文或中文绘画描述，需结构清晰、细节丰富",
+    "style": "一种风格，可选值：realistic, anime, digital-painting, oil-painting, pixel-art",
+    "size": 尺寸数字，仅允许 256, 512, 1024 中的一个，
+    "steps": 步数，仅允许 30, 50, 100 中的一个，
+    "num": 数量，仅允许 1, 2, 3 中的一个
+}}
+
+示例：
+用户输入："一只可爱的猫"
+输出：
+{{
+    "optimized_prompt": "一只可爱的猫，毛茸茸的，大眼睛，好奇的表情，柔和的自然光，高细节，4K",
+    "style": "realistic",
+    "size": 512,
+    "steps": 50,
+    "num": 1
+}}
+
+如果是图生图模式，优化后的提示词应强调保持参考图构图、增强细节。"""
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LLM_API_KEY}"
+    }
+    payload = {
+        "model": LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        "temperature": 0.2,
+        "max_tokens": 400
+    }
+    try:
+        resp = requests.post(LLM_BASE_URL, json=payload, headers=headers, timeout=20)
+        resp.raise_for_status()
+        result = resp.json()
+        content = result["choices"][0]["message"]["content"]
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            params = json.loads(json_match.group())
+            # 校验并修正值
+            allowed_styles = ["realistic", "anime", "digital-painting", "oil-painting", "pixel-art"]
+            if params.get("style") not in allowed_styles:
+                params["style"] = "realistic"
+            if params.get("size") not in [256, 512, 1024]:
+                params["size"] = 512
+            if params.get("steps") not in [30, 50, 100]:
+                params["steps"] = 50
+            if params.get("num") not in [1, 2, 3]:
+                params["num"] = 1
+            return params
+        else:
+            print("大模型返回未包含JSON，使用原始prompt")
+            return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30, "num": 1}
+    except Exception as e:
+        print(f"调用大模型失败：{e}，使用原始参数")
+        return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30, "num": 1}
+
+# ===================================================================
+# 路由：前端页面（含完整交互逻辑）
+# ===================================================================
 HTML_PAGE = """
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <title>GPTs AI 画图 + DeepSeek 智能优化</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="icon" href="data:,">
-  <style>
-    body { font-family: Arial; margin: 20px; }
-    input[type=text], textarea, select, input[type=file] { padding: 8px; font-size: 16px; margin: 4px 0; width: 70%; }
-    input[type=file] { color: transparent; width: auto; }
-    textarea { resize: vertical; line-height: 1.5; }
-    input[type=button], input[type=submit] { padding: 8px 16px; font-size: 16px; margin-top: 4px; }
-    img.thumb { width: 160px; height: 160px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
-    img.result-thumb { width: 300px; height: 300px; object-fit: cover; margin: 8px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; }
-    .container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 12px; }
-    .error { color: red; margin-top: 10px; }
-    .loading { color: blue; margin-top: 10px; }
-    .preview-item { position: relative; display: inline-block; }
-    .preview-item .delete-btn {
-      position: absolute; top: 0; right: 0;
-      background: rgba(255,0,0,0.7); color: white; border: none; border-radius: 50%;
-      width: 22px; height: 22px; font-size: 14px; line-height: 22px; text-align: center; cursor: pointer;
-    }
-    .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.8); justify-content:center; align-items:center; overflow: hidden; }
-    .modal img { max-width: 95vw; max-height: 95vh; transform-origin: center center; transition: transform 0.1s ease; user-select: none; }
-    #preview_section { margin: 12px 0; }
-    #preview_container { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 8px; }
-    #upload_section { display:none; margin: 8px 0; }
-    #size_section, #num_section, #style_section, #steps_section { display: inline-block; margin-right: 12px; margin-top: 8px; }
-    .confirm-dialog {
-      display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
-    }
-    .confirm-box { background: white; padding: 20px; border-radius: 10px; text-align: center; max-width: 300px; }
-    .confirm-box button { margin: 10px 5px; padding: 8px 20px; font-size: 16px; }
-    .btn-generate { background: #007bff; color: white; border: none; }
-    .btn-cancel { background: #ccc; border: none; }
-    .catbox-link { font-size: 12px; word-break: break-all; display: block; margin-top: 4px; color: #666; }
-    .opt-note { background: #eef; padding: 6px 12px; border-radius: 8px; margin: 10px 0; font-size: 14px; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>AI画图工坊 · 智能优化</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f5f7fb;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .card {
+            max-width: 760px;
+            width: 100%;
+            background: white;
+            border-radius: 40px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+            padding: 28px 32px 36px;
+        }
+        h2 { font-size: 1.8rem; font-weight: 700; margin: 0 0 4px 0; color: #0f172a; }
+        .sub { color: #5b6e8c; margin-bottom: 24px; font-size: 0.9rem; border-left: 3px solid #cbd5e1; padding-left: 12px; }
+        .ai-placeholder { min-height: 64px; margin: 8px 0 12px 0; }
+        .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid #22c55e; margin: 0; }
+        .hidden { display: none; }
+        .toggle-row {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #f1f5f9; padding: 12px 20px; border-radius: 60px; margin-bottom: 28px;
+        }
+        .toggle-label { font-weight: 600; font-size: 1rem; color: #0f172a; }
+        .toggle-switch { position: relative; display: inline-block; width: 52px; height: 28px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #cbd5e1; transition: 0.2s; border-radius: 28px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 24px; width: 24px; left: 2px; bottom: 2px;
+            background-color: white; transition: 0.2s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+        }
+        input:checked + .slider { background-color: #86efac; }
+        input:checked + .slider:before { transform: translateX(24px); }
+        .mode-buttons {
+            display: flex; gap: 24px; margin-bottom: 24px;
+            background: #f8fafc; padding: 8px 16px; border-radius: 60px; width: fit-content;
+        }
+        .mode-buttons label { display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; }
+        .params-panel { background: #f8fafc; border-radius: 32px; padding: 18px 24px; margin-bottom: 24px; }
+        .param-row { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px; }
+        .param-group { flex: 1; min-width: 120px; }
+        .param-group label { display: block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: #475569; margin-bottom: 5px; }
+        select, input { width: 100%; padding: 8px 12px; border-radius: 28px; border: 1px solid #cbd5e1; background: white; font-size: 0.9rem; }
+        textarea { width: 100%; padding: 12px 16px; border-radius: 28px; border: 1px solid #cbd5e1; font-family: inherit; font-size: 0.95rem; resize: vertical; margin-bottom: 18px; }
+        .upload-section { background: #fef9e3; border-radius: 28px; padding: 16px 20px; margin-bottom: 18px; display: none; }
+        .upload-section.active { display: block; }
+        .preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+        .preview-img { width: 80px; height: 80px; object-fit: cover; border-radius: 16px; border: 1px solid #ddd; }
+        .btn-generate { background: #3b82f6; width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600; border: none; border-radius: 44px; color: white; cursor: pointer; margin-top: 6px; }
+        .btn-generate:hover { background: #2563eb; }
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center;
+            z-index: 1000; visibility: hidden; opacity: 0; transition: 0.2s;
+        }
+        .modal-overlay.active { visibility: visible; opacity: 1; }
+        .modal-card { background: white; max-width: 500px; width: 90%; border-radius: 48px; padding: 28px; box-shadow: 0 25px 40px rgba(0,0,0,0.2); }
+        .modal-card h3 { margin-top: 0; font-size: 1.6rem; font-weight: 600; }
+        .modal-params { background: #f1f5f9; border-radius: 28px; padding: 18px; margin: 20px 0; }
+        .button-group { display: flex; gap: 12px; justify-content: flex-end; }
+        .btn-confirm { background: #86efac; border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { background: #cbd5e1; border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        .footnote { font-size: 0.7rem; text-align: center; color: #94a3b8; margin-top: 24px; }
+        .param-hidden { display: none; }
+        .loading-indicator { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 12px 24px; border-radius: 40px; z-index: 2000; }
+    </style>
 </head>
 <body>
-<h2>GPTs AI 画图 + DeepSeek 智能优化</h2>
-{% if enable_llm %}
-<div class="opt-note">✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动优化为更适合 AI 绘画的参数。</div>
-{% else %}
-<div class="opt-note">⚠️ 未配置大模型 API Key，将使用原始参数生成。</div>
-{% endif %}
+<div class="card">
+    <h2>🎨 AI画图工坊</h2>
+    <div class="sub">自然语言绘图 · 智能增强</div>
 
-<form id="main-form" method="post" action="/" enctype="multipart/form-data">
-  <label>
-    <input type="radio" name="mode" value="text2image" checked onchange="toggleMode()"> 文生图
-  </label>
-  <label style="margin-left: 12px;">
-    <input type="radio" name="mode" value="image2image" onchange="toggleMode()"> 图生图
-  </label>
-  <br><br>
-  Prompt: <br>
-  <textarea name="prompt" id="prompt" rows="5" maxlength="200" placeholder="输入你的创意提示" required></textarea>
-  <br>
-  <div id="size_section">
-    尺寸: 
-    <select name="size" id="size">
-      <option value="256">256x256</option>
-      <option value="512" selected>512x512</option>
-      <option value="1024">1024x1024</option>
-    </select>
-  </div>
-  <div id="num_section">
-    数量: 
-    <select name="num" id="num">
-      <option value="1" selected>1</option>
-      <option value="2">2</option>
-      <option value="3">3</option>
-    </select>
-  </div>
-  <div id="style_section">
-    风格: 
-    <select name="style" id="style">
-      <option value="realistic" selected>写实 (Realistic)</option>
-      <option value="anime">二次元 (Anime)</option>
-      <option value="digital-painting">数字绘画 (Digital Painting)</option>
-      <option value="oil-painting">油画 (Oil Painting)</option>
-      <option value="pixel-art">像素风 (Pixel Art)</option>
-    </select>
-  </div>
-  <div id="steps_section">
-    细节步数: 
-    <select name="steps" id="steps">
-      <option value="30" selected>30 - 快速生成</option>
-      <option value="50">50 - 标准细节</option>
-      <option value="100">100 - 高细节</option>
-    </select>
-  </div>
-  <br>
-  <div id="upload_section">
-    上传参考图片（可多张）: <input type="file" name="image_files" id="image_input" accept="image/*" multiple><br>
-    <div id="preview_section">
-      <div id="preview_container"></div>
+    <div class="ai-placeholder">
+        <div id="aiNote" class="ai-note hidden">✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。</div>
     </div>
-  </div>
-  <br>
-  <input type="button" id="submit-btn" value="生成图片">
-</form>
 
-{% if loading %}
-  <div class="loading">正在生成，请稍候…</div>
-{% endif %}
-
-{% if uploaded_images %}
-  <h3>参考图片:</h3>
-  <div class="container">
-  {% for url in uploaded_images %}
-    <img class="thumb" src="{{ url }}" onclick="showModal(this.src)">
-  {% endfor %}
-  </div>
-{% endif %}
-
-{% if image_results %}
-  <h3>生成结果:</h3>
-  <div class="container">
-  {% for item in image_results %}
-    <div class="result-item">
-      <img class="result-thumb" src="{{ item.display_url }}" onclick="showModal(this.src)">
-      {% if item.catbox_url %}
-        <a class="catbox-link" href="{{ item.catbox_url }}" target="_blank">🔗 永久链接</a>
-      {% endif %}
+    <div class="toggle-row">
+        <span class="toggle-label">✨ 启用 DeepSeek-V3 优化</span>
+        <label class="toggle-switch">
+            <input type="checkbox" id="aiOptimizeToggle">
+            <span class="slider"></span>
+        </label>
     </div>
-  {% endfor %}
-  </div>
-{% endif %}
 
-{% if error %}
-  <div class="error">{{ error }}</div>
-{% endif %}
+    <div class="mode-buttons">
+        <label><input type="radio" name="mode" value="text2image" checked> 🔘 文生图</label>
+        <label><input type="radio" name="mode" value="image2image"> 🔘 图生图</label>
+    </div>
 
-<div class="modal" id="modal" onclick="hideModal()">
-  <img id="modalImg" src="">
+    <div id="paramsPanel" class="params-panel">
+        <div class="param-row">
+            <div class="param-group"><label>📐 尺寸</label><select id="sizeSelect"><option value="256">256x256</option><option value="512" selected>512x512</option><option value="1024">1024x1024</option></select></div>
+            <div class="param-group"><label>🎨 风格</label><select id="styleSelect"><option value="realistic">写实</option><option value="anime">二次元</option><option value="digital-painting">数字绘画</option><option value="oil-painting">油画</option><option value="pixel-art">像素风</option></select></div>
+        </div>
+        <div class="param-row">
+            <div class="param-group"><label>🔢 数量</label><select id="numSelect"><option value="1">1张</option><option value="2">2张</option><option value="3">3张</option></select></div>
+            <div class="param-group"><label>⚙️ 细节步数</label><select id="stepsSelect"><option value="30">30 - 快速</option><option value="50" selected>50 - 标准</option><option value="100">100 - 高细节</option></select></div>
+        </div>
+    </div>
+
+    <div id="uploadArea" class="upload-section">
+        <div>📷 上传参考图片（可多张）</div>
+        <input type="file" id="imageInput" accept="image/*" multiple>
+        <div id="previewContainer" class="preview-container"></div>
+    </div>
+
+    <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
+
+    <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
+    <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
 </div>
 
-<div class="confirm-dialog" id="confirm-dialog">
-  <div class="confirm-box">
-    <p>确认生成图片？<br>这将消耗一次额度</p>
-    <button class="btn-generate" id="confirm-yes">确认生成</button>
-    <button class="btn-cancel" id="confirm-no">取消</button>
-  </div>
+<div id="confirmModal" class="modal-overlay">
+    <div class="modal-card">
+        <h3>📝 是否生成以下内容？</h3>
+        <div class="modal-params">
+            <p><strong>✨ 优化后提示词：</strong><br><span id="optPromptText">—</span></p>
+            <p><strong>📏 尺寸：</strong> <span id="optSize">512x512</span> &nbsp;|&nbsp;
+               <strong>🎨 风格：</strong> <span id="optStyle">写实</span> &nbsp;|&nbsp;
+               <strong>🔢 数量：</strong> <span id="optNum">1</span> &nbsp;|&nbsp;
+               <strong>⚙️ 步数：</strong> <span id="optSteps">50</span>
+            </p>
+        </div>
+        <div class="button-group">
+            <button id="modalCancelBtn" class="btn-cancel">取消</button>
+            <button id="modalConfirmBtn" class="btn-confirm">确认生成</button>
+        </div>
+    </div>
 </div>
+<div id="loadingIndicator" class="loading-indicator">⏳ 生成中，请稍候...</div>
 
 <script>
-let currentScale = 1;
-let currentX = 0;
-let currentY = 0;
-let startX = 0;
-let startY = 0;
-let isDragging = false;
-const modal = document.getElementById('modal');
-const modalImg = document.getElementById('modalImg');
-let selectedFiles = [];
+    // DOM 元素
+    const aiToggle = document.getElementById('aiOptimizeToggle');
+    const aiNoteDiv = document.getElementById('aiNote');
+    const paramsPanel = document.getElementById('paramsPanel');
+    const modeRadios = document.querySelectorAll('input[name="mode"]');
+    const uploadArea = document.getElementById('uploadArea');
+    const imageInput = document.getElementById('imageInput');
+    const previewContainer = document.getElementById('previewContainer');
+    const generateBtn = document.getElementById('generateBtn');
+    const modal = document.getElementById('confirmModal');
+    const modalCancel = document.getElementById('modalCancelBtn');
+    const modalConfirm = document.getElementById('modalConfirmBtn');
+    const optPromptSpan = document.getElementById('optPromptText');
+    const optSizeSpan = document.getElementById('optSize');
+    const optStyleSpan = document.getElementById('optStyle');
+    const optNumSpan = document.getElementById('optNum');
+    const optStepsSpan = document.getElementById('optSteps');
+    const loadingIndicator = document.getElementById('loadingIndicator');
 
-function toggleMode() {
-    var mode = document.querySelector('input[name="mode"]:checked').value;
-    document.getElementById('upload_section').style.display = (mode === 'image2image') ? 'block' : 'none';
-}
+    let selectedFiles = [];
+    let currentOptimizedParams = null;  // 存储优化后的参数，用于确认生成
 
-function renderPreview() {
-    const container = document.getElementById('preview_container');
-    container.innerHTML = '';
-    if (selectedFiles.length === 0) return;
-    selectedFiles.forEach((file, index) => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const itemDiv = document.createElement('div');
-            itemDiv.className = 'preview-item';
-            const img = document.createElement('img');
-            img.className = 'thumb';
-            img.src = e.target.result;
-            img.onclick = function() { showModal(this.src); };
-            const delBtn = document.createElement('span');
-            delBtn.className = 'delete-btn';
-            delBtn.innerHTML = '✕';
-            delBtn.title = '删除此图片';
-            delBtn.onclick = function(ev) {
-                ev.stopPropagation();
-                selectedFiles.splice(index, 1);
-                renderPreview();
-                updateFileInput();
+    // 预览相关
+    function updatePreview() {
+        previewContainer.innerHTML = '';
+        selectedFiles.forEach((file, idx) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'preview-img';
+                const delBtn = document.createElement('button');
+                delBtn.innerText = '✕';
+                delBtn.style.position = 'relative';
+                delBtn.style.marginLeft = '-24px';
+                delBtn.style.background = 'rgba(0,0,0,0.5)';
+                delBtn.style.color = 'white';
+                delBtn.style.border = 'none';
+                delBtn.style.borderRadius = '20px';
+                delBtn.style.cursor = 'pointer';
+                delBtn.onclick = () => {
+                    selectedFiles.splice(idx, 1);
+                    updatePreview();
+                    syncFileInput();
+                };
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'relative';
+                wrapper.appendChild(img);
+                wrapper.appendChild(delBtn);
+                previewContainer.appendChild(wrapper);
             };
-            itemDiv.appendChild(img);
-            itemDiv.appendChild(delBtn);
-            container.appendChild(itemDiv);
-        };
-        reader.readAsDataURL(file);
+            reader.readAsDataURL(file);
+        });
+    }
+    function syncFileInput() {
+        const dt = new DataTransfer();
+        selectedFiles.forEach(f => dt.items.add(f));
+        imageInput.files = dt.files;
+    }
+    imageInput.addEventListener('change', (e) => {
+        const newFiles = Array.from(e.target.files);
+        newFiles.forEach(file => {
+            if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+                selectedFiles.push(file);
+            }
+        });
+        updatePreview();
+        syncFileInput();
     });
-}
 
-function updateFileInput() {
-    const dt = new DataTransfer();
-    selectedFiles.forEach(f => dt.items.add(f));
-    document.getElementById('image_input').files = dt.files;
-}
+    // 模式切换
+    function toggleUploadArea() {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        if (mode === 'image2image') uploadArea.classList.add('active');
+        else uploadArea.classList.remove('active');
+    }
+    modeRadios.forEach(radio => radio.addEventListener('change', toggleUploadArea));
+    toggleUploadArea();
 
-document.getElementById('image_input').addEventListener('change', function(e) {
-    const newFiles = Array.from(e.target.files);
-    newFiles.forEach(file => {
-        const exists = selectedFiles.some(f => f.name === file.name && f.size === file.size);
-        if (!exists) selectedFiles.push(file);
-    });
-    renderPreview();
-    updateFileInput();
-});
-
-function showModal(src){
-    modalImg.src = src;
-    modal.style.display = 'flex';
-    currentScale = 1;
-    currentX = 0;
-    currentY = 0;
-    updateTransform();
-}
-function hideModal(){ modal.style.display = 'none'; }
-function updateTransform() {
-    modalImg.style.transform = `translate(${currentX}px, ${currentY}px) scale(${currentScale})`;
-}
-
-modalImg.addEventListener('wheel', function(e) {
-    e.preventDefault();
-    const scaleStep = 0.1;
-    if (e.deltaY < 0) { currentScale = Math.min(currentScale + scaleStep, 10); }
-    else { currentScale = Math.max(currentScale - scaleStep, 0.5); }
-    updateTransform();
-});
-
-modalImg.addEventListener('mousedown', function(e) {
-    e.preventDefault();
-    isDragging = true;
-    startX = e.clientX - currentX;
-    startY = e.clientY - currentY;
-});
-document.addEventListener('mousemove', function(e) {
-    if (!isDragging) return;
-    e.preventDefault();
-    currentX = e.clientX - startX;
-    currentY = e.clientY - startY;
-    updateTransform();
-});
-document.addEventListener('mouseup', function() { isDragging = false; });
-
-modalImg.addEventListener('touchstart', function(e) {
-    isDragging = true;
-    startX = e.touches[0].clientX - currentX;
-    startY = e.touches[0].clientY - currentY;
-});
-document.addEventListener('touchmove', function(e) {
-    if (!isDragging) return;
-    currentX = e.touches[0].clientX - startX;
-    currentY = e.touches[0].clientY - startY;
-    updateTransform();
-});
-document.addEventListener('touchend', function() { isDragging = false; });
-
-modal.addEventListener('click', function(e) {
-    if (e.target === modal) { hideModal(); }
-});
-
-document.getElementById('submit-btn').addEventListener('click', function() {
-    var mode = document.querySelector('input[name="mode"]:checked').value;
-    if (mode === 'image2image') {
-        if (selectedFiles.length === 0) {
-            alert("请先上传参考图片再生成");
-            return;
+    // AI 开关UI
+    function updateAIUI() {
+        const enabled = aiToggle.checked;
+        if (enabled) {
+            aiNoteDiv.classList.remove('hidden');
+            paramsPanel.classList.add('param-hidden');
+        } else {
+            aiNoteDiv.classList.add('hidden');
+            paramsPanel.classList.remove('param-hidden');
         }
     }
-    document.getElementById('confirm-dialog').style.display = 'flex';
-});
+    aiToggle.addEventListener('change', updateAIUI);
+    updateAIUI();
 
-document.getElementById('confirm-yes').addEventListener('click', function() {
-    document.getElementById('confirm-dialog').style.display = 'none';
-    var btn = document.getElementById('submit-btn');
-    btn.value = '生成中…';
-    btn.disabled = true;
-    var form = document.getElementById('main-form');
-    var formData = new FormData(form);
-    formData.delete('image_files');
-    selectedFiles.forEach(file => { formData.append('image_files', file); });
-    fetch(form.action, { method: 'POST', body: formData })
-    .then(response => response.text())
-    .then(html => { document.open(); document.write(html); document.close(); })
-    .catch(err => { console.error(err); btn.value = '生成图片'; btn.disabled = false; alert('提交失败，请重试'); });
-});
+    // 通用获取表单数据（不含文件）
+    function getFormData() {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        const prompt = document.getElementById('promptInput').value.trim();
+        if (!prompt) { alert("请输入提示词"); return null; }
+        const size = document.getElementById('sizeSelect')?.value || "512";
+        const style = document.getElementById('styleSelect')?.value || "realistic";
+        const num = document.getElementById('numSelect')?.value || "1";
+        const steps = document.getElementById('stepsSelect')?.value || "50";
+        return { mode, prompt, size, style, num, steps };
+    }
 
-document.getElementById('confirm-no').addEventListener('click', function() {
-    document.getElementById('confirm-dialog').style.display = 'none';
-});
+    // 显示加载动画
+    function showLoading() { loadingIndicator.style.display = 'block'; }
+    function hideLoading() { loadingIndicator.style.display = 'none'; }
 
-toggleMode();
+    // 生成图片（最终提交）
+    async function submitGenerate(params) {
+        const formData = new FormData();
+        formData.append('mode', params.mode);
+        formData.append('prompt', params.prompt);
+        formData.append('size', params.size);
+        formData.append('style', params.style);
+        formData.append('num', params.num);
+        formData.append('steps', params.steps);
+        for (let file of selectedFiles) {
+            formData.append('image_files', file);
+        }
+        showLoading();
+        try {
+            const resp = await fetch('/generate', { method: 'POST', body: formData });
+            const html = await resp.text();
+            // 替换整个页面以显示结果
+            document.open();
+            document.write(html);
+            document.close();
+        } catch (err) {
+            alert("生成失败：" + err);
+            hideLoading();
+        }
+    }
+
+    // 普通模式：直接生成
+    async function normalGenerate() {
+        const data = getFormData();
+        if (!data) return;
+        await submitGenerate(data);
+    }
+
+    // AI优化模式：先获取优化参数，弹窗确认后再生成
+    async function aiOptimizeAndConfirm() {
+        const data = getFormData();
+        if (!data) return;
+        showLoading();
+        try {
+            const resp = await fetch('/optimize', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: data.prompt, mode: data.mode })
+            });
+            const opt = await resp.json();
+            if (!opt.success) throw new Error(opt.error);
+            currentOptimizedParams = {
+                mode: data.mode,
+                prompt: opt.optimized_prompt,
+                size: opt.size,
+                style: opt.style,
+                num: opt.num,
+                steps: opt.steps
+            };
+            // 填充弹窗
+            optPromptSpan.innerText = currentOptimizedParams.prompt;
+            optSizeSpan.innerText = currentOptimizedParams.size;
+            const styleMap = { 'realistic':'写实', 'anime':'二次元', 'digital-painting':'数字绘画', 'oil-painting':'油画', 'pixel-art':'像素风' };
+            optStyleSpan.innerText = styleMap[currentOptimizedParams.style] || currentOptimizedParams.style;
+            optNumSpan.innerText = currentOptimizedParams.num;
+            optStepsSpan.innerText = currentOptimizedParams.steps;
+            modal.classList.add('active');
+            hideLoading();
+        } catch (err) {
+            alert("优化失败：" + err);
+            hideLoading();
+        }
+    }
+
+    // 生成按钮点击处理
+    generateBtn.addEventListener('click', () => {
+        if (aiToggle.checked) {
+            aiOptimizeAndConfirm();
+        } else {
+            normalGenerate();
+        }
+    });
+
+    // 弹窗按钮
+    modalCancel.addEventListener('click', () => { modal.classList.remove('active'); });
+    modalConfirm.addEventListener('click', async () => {
+        modal.classList.remove('active');
+        if (currentOptimizedParams) {
+            await submitGenerate(currentOptimizedParams);
+        } else {
+            alert("优化参数丢失，请重试");
+        }
+    });
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
 </script>
 </body>
 </html>
 """
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 def index():
-    uploaded_images = []
-    image_results = None
-    error_msg = None
-    loading = False
+    return render_template_string(HTML_PAGE)
 
-    if request.method == "POST":
-        mode = request.form.get("mode", "text2image")
-        original_prompt = request.form["prompt"]
-        size = request.form.get("size", "512")
-        num = int(request.form.get("num", "1"))
-        style = request.form.get("style", "realistic")
-        steps = int(request.form.get("steps", "30"))
-        image_files = []
-        loading = True
+# ===================================================================
+# API 路由：优化参数
+# ===================================================================
+@app.route("/optimize", methods=["POST"])
+def optimize():
+    if not ENABLE_LLM_OPT:
+        return jsonify({"success": False, "error": "大模型未配置"}), 400
+    data = request.get_json()
+    prompt = data.get("prompt", "").strip()
+    mode = data.get("mode", "text2image")
+    if not prompt:
+        return jsonify({"success": False, "error": "提示词不能为空"}), 400
+    try:
+        opt = call_llm_for_optimization(prompt, mode)
+        return jsonify({
+            "success": True,
+            "optimized_prompt": opt["optimized_prompt"],
+            "style": opt["style"],
+            "size": str(opt["size"]),
+            "steps": opt["steps"],
+            "num": opt["num"]
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
-        # 1. 如果启用了大模型优化，调用 LLM 获取优化后的参数
-        if ENABLE_LLM_OPT:
-            try:
-                opt_result = call_llm_for_optimization(original_prompt)
-                optimized_prompt = opt_result.get("optimized_prompt", original_prompt)
-                # 用大模型推荐的参数覆盖用户的选择
-                style = opt_result.get("style", style)
-                size = str(opt_result.get("size", int(size)))   # 确保是字符串
-                steps = int(opt_result.get("steps", steps))
-                print(f"大模型优化结果: prompt='{optimized_prompt}', style={style}, size={size}, steps={steps}")
-            except Exception as e:
-                print(f"大模型优化失败，使用原始参数: {e}")
-                optimized_prompt = original_prompt
-        else:
-            optimized_prompt = original_prompt
+# ===================================================================
+# API 路由：生成图片（最终）
+# ===================================================================
+@app.route("/generate", methods=["POST"])
+def generate():
+    mode = request.form.get("mode")
+    prompt = request.form.get("prompt")
+    size = request.form.get("size")
+    style = request.form.get("style")
+    num = int(request.form.get("num", 1))
+    steps = int(request.form.get("steps", 50))
+    image_files = request.files.getlist("image_files") if mode == "image2image" else []
 
-        # 2. 处理图生图的上传文件
-        if mode == "image2image":
-            image_files = request.files.getlist("image_files")
-            for f in image_files:
-                f.seek(0)
-                content = f.read()
-                uploaded_images.append("data:image/png;base64," + base64.b64encode(content).decode("utf-8"))
-                f.seek(0)
+    if not prompt:
+        return render_template_string(HTML_PAGE, error="提示词不能为空", enable_llm=ENABLE_LLM_OPT)
+    try:
+        results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
+        return render_template_string(HTML_PAGE, image_results=results, enable_llm=ENABLE_LLM_OPT)
+    except Exception as e:
+        return render_template_string(HTML_PAGE, error=f"生成失败: {e}", enable_llm=ENABLE_LLM_OPT)
 
-        # 3. 调用图像生成 API
-        try:
-            image_results = generate_images(mode, optimized_prompt, int(size), num, style, steps, image_files)
-        except Exception as e:
-            error_msg = f"生成失败: {e}"
-            print(f"最终错误: {error_msg}")
-
-    return render_template_string(HTML_PAGE,
-                                  image_results=image_results,
-                                  error=error_msg,
-                                  loading=loading,
-                                  uploaded_images=uploaded_images,
-                                  enable_llm=ENABLE_LLM_OPT)
-
+# ===================================================================
+# 启动 Flask 应用
+# ===================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
