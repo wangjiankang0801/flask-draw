@@ -9,12 +9,7 @@ HTML_PAGE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>AI画图工坊 · 智能优化</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
             --primary-blue: #3b82f6;
             --primary-blue-hover: #2563eb;
@@ -31,17 +26,18 @@ HTML_PAGE = """
             --text-minor: #94a3b8;
             --transition: 0.2s ease;
         }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: var(--bg-light);
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            justify-content: center;
-            padding: 20px;
+            justify-content: flex-start;
+            /* 固定上下边距，底部适配全面屏安全区 */
+            padding: 20px 20px max(20px, env(safe-area-inset-bottom)) 20px;
+            margin: 0;
         }
-
         .card {
             max-width: 760px;
             width: 100%;
@@ -51,8 +47,18 @@ HTML_PAGE = """
             padding: 28px 32px 24px;
             display: flex;
             flex-direction: column;
+            /* 关键：固定卡片高度，占满屏幕可用空间，底部位置永远不变 */
+            min-height: calc(100vh - 40px);
+            flex-shrink: 0;
         }
-
+        /* 新增：中间内容包裹层，自动占满剩余空间，不影响底部布局 */
+        .content-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+            padding-bottom: 16px;
+        }
         h2 {
             font-size: 1.8rem;
             font-weight: 700;
@@ -66,7 +72,6 @@ HTML_PAGE = """
             padding-left: 12px;
             margin-bottom: 24px;
         }
-
         .ai-placeholder {
             min-height: 64px;
             margin-bottom: 12px;
@@ -84,7 +89,6 @@ HTML_PAGE = """
             visibility: hidden;
             opacity: 0;
         }
-
         .toggle-row {
             display: flex;
             align-items: center;
@@ -140,7 +144,6 @@ HTML_PAGE = """
         input:checked + .slider:before {
             transform: translateX(24px);
         }
-
         .mode-buttons {
             display: flex;
             gap: 24px;
@@ -165,7 +168,6 @@ HTML_PAGE = """
             margin: 0;
             transform: scale(1.1);
         }
-
         .params-panel {
             background: var(--bg-gray-1);
             border-radius: 32px;
@@ -207,7 +209,6 @@ HTML_PAGE = """
             font-size: 0.9rem;
             outline: none;
         }
-
         .upload-section {
             background: #fef9e3;
             border-radius: 28px;
@@ -248,7 +249,6 @@ HTML_PAGE = """
             font-size: 12px;
             line-height: 1;
         }
-
         textarea {
             width: 100%;
             padding: 12px 16px;
@@ -256,7 +256,7 @@ HTML_PAGE = """
             border: 1px solid var(--border-gray);
             font-size: 0.95rem;
             resize: vertical;
-            margin-bottom: 18px;
+            margin-bottom: 0;
             font-family: inherit;
             outline: none;
             transition: height 0.1s ease;
@@ -264,7 +264,6 @@ HTML_PAGE = """
         textarea:focus {
             border-color: var(--primary-blue);
         }
-
         .btn-generate {
             width: 100%;
             padding: 14px;
@@ -275,7 +274,7 @@ HTML_PAGE = """
             background: var(--primary-blue);
             color: white;
             cursor: pointer;
-            margin-top: auto;
+            margin-top: 18px;
             transition: var(--transition);
         }
         .btn-generate:hover {
@@ -285,15 +284,12 @@ HTML_PAGE = """
             background: #94a3b8;
             cursor: not-allowed;
         }
-
         .footnote {
             font-size: 0.7rem;
             text-align: center;
             color: var(--text-minor);
             margin-top: 16px;
         }
-
-        /* 结果展示区域 */
         .results-section {
             margin-top: 28px;
             border-top: 1px solid var(--border-gray);
@@ -336,7 +332,6 @@ HTML_PAGE = """
         .catbox-link:hover {
             text-decoration: underline;
         }
-
         .error-message {
             margin-top: 20px;
             padding: 14px 18px;
@@ -346,8 +341,6 @@ HTML_PAGE = """
             font-weight: 500;
             border-left: 4px solid #ef4444;
         }
-
-        /* 模态弹窗（图片放大） */
         .image-modal {
             display: none;
             position: fixed;
@@ -367,7 +360,6 @@ HTML_PAGE = """
             border-radius: 20px;
             box-shadow: 0 0 30px rgba(0,0,0,0.5);
         }
-
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -432,100 +424,83 @@ HTML_PAGE = """
 </head>
 <body>
 <div class="card">
-    <h2>🎨 AI画图工坊</h2>
-    <div class="sub">自然语言绘图 · 智能增强</div>
+    <!-- 中间所有内容都包裹在content-wrapper里，自动适配高度 -->
+    <div class="content-wrapper">
+        <h2>🎨 AI画图工坊</h2>
+        <div class="sub">自然语言绘图 · 智能增强</div>
 
-    <div class="ai-placeholder">
-        <div id="aiNote" class="ai-note hidden-vis">
-            ✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。
-        </div>
-    </div>
-
-    <div class="toggle-row">
-        <span class="toggle-label">✨ 启用 DeepSeek-V3 优化</span>
-        <label class="toggle-switch">
-            <input type="checkbox" id="aiOptimizeToggle">
-            <span class="slider"></span>
-        </label>
-    </div>
-
-    <div class="mode-buttons">
-        <label><input type="radio" name="mode" value="text2image" checked> 文生图</label>
-        <label><input type="radio" name="mode" value="image2image"> 图生图</label>
-    </div>
-
-    <div id="paramsPanel" class="params-panel">
-        <div class="param-row">
-            <div class="param-group">
-                <label>📐 尺寸</label>
-                <select id="sizeSelect">
-                    <option value="256">256x256</option>
-                    <option value="512" selected>512x512</option>
-                    <option value="1024">1024x1024</option>
-                </select>
-            </div>
-            <div class="param-group">
-                <label>🎨 风格</label>
-                <select id="styleSelect">
-                    <option value="realistic">写实 (Realistic)</option>
-                    <option value="anime">二次元 (Anime)</option>
-                    <option value="digital-painting">数字绘画</option>
-                    <option value="oil-painting">油画</option>
-                    <option value="pixel-art">像素风</option>
-                </select>
+        <div class="ai-placeholder">
+            <div id="aiNote" class="ai-note hidden-vis">
+                ✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。
             </div>
         </div>
-        <div class="param-row">
-            <div class="param-group">
-                <label>🔢 数量</label>
-                <select id="numSelect">
-                    <option value="1">1张</option>
-                    <option value="2">2张</option>
-                    <option value="3">3张</option>
-                </select>
+
+        <div class="toggle-row">
+            <span class="toggle-label">✨ 启用 DeepSeek-V3 优化</span>
+            <label class="toggle-switch">
+                <input type="checkbox" id="aiOptimizeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="mode-buttons">
+            <label><input type="radio" name="mode" value="text2image" checked> 文生图</label>
+            <label><input type="radio" name="mode" value="image2image"> 图生图</label>
+        </div>
+
+        <div id="paramsPanel" class="params-panel">
+            <div class="param-row">
+                <div class="param-group">
+                    <label>📐 尺寸</label>
+                    <select id="sizeSelect">
+                        <option value="256">256x256</option>
+                        <option value="512" selected>512x512</option>
+                        <option value="1024">1024x1024</option>
+                    </select>
+                </div>
+                <div class="param-group">
+                    <label>🎨 风格</label>
+                    <select id="styleSelect">
+                        <option value="realistic">写实 (Realistic)</option>
+                        <option value="anime">二次元 (Anime)</option>
+                        <option value="digital-painting">数字绘画</option>
+                        <option value="oil-painting">油画</option>
+                        <option value="pixel-art">像素风</option>
+                    </select>
+                </div>
             </div>
-            <div class="param-group">
-                <label>⚙️ 细节步数</label>
-                <select id="stepsSelect">
-                    <option value="30">30 - 快速</option>
-                    <option value="50" selected>50 - 标准</option>
-                    <option value="100">100 - 高细节</option>
-                </select>
+            <div class="param-row">
+                <div class="param-group">
+                    <label>🔢 数量</label>
+                    <select id="numSelect">
+                        <option value="1">1张</option>
+                        <option value="2">2张</option>
+                        <option value="3">3张</option>
+                    </select>
+                </div>
+                <div class="param-group">
+                    <label>⚙️ 细节步数</label>
+                    <select id="stepsSelect">
+                        <option value="30">30 - 快速</option>
+                        <option value="50" selected>50 - 标准</option>
+                        <option value="100">100 - 高细节</option>
+                    </select>
+                </div>
             </div>
         </div>
+
+        <div id="uploadArea" class="upload-section">
+            <div>📷 上传参考图片（可多张）</div>
+            <input type="file" id="imageInput" accept="image/*" multiple>
+            <div id="previewContainer" class="preview-container"></div>
+        </div>
+
+        <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
     </div>
 
-    <div id="uploadArea" class="upload-section">
-        <div>📷 上传参考图片（可多张）</div>
-        <input type="file" id="imageInput" accept="image/*" multiple>
-        <div id="previewContainer" class="preview-container"></div>
-    </div>
-
-    <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
-
+    <!-- 底部固定区域，永远在卡片最底部，两个模式位置完全一致 -->
     <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
     <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
-
-    <!-- ===== 生成结果展示区域 ===== -->
-    {% if image_results %}
-    <div class="results-section">
-        <div class="results-title">🖼️ 生成结果</div>
-        <div class="results-grid">
-        {% for item in image_results %}
-            <div class="result-card">
-                <img class="result-img" src="{{ item.display_url }}" onclick="openImageModal(this.src)" alt="生成图片">
-                {% if item.catbox_url %}
-                <a class="catbox-link" href="{{ item.catbox_url }}" target="_blank">🔗 永久链接</a>
-                {% endif %}
-            </div>
-        {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-
-    {% if error %}
-    <div class="error-message">{{ error }}</div>
-    {% endif %}
 </div>
 
 <!-- 图片放大模态框 -->
@@ -586,58 +561,8 @@ HTML_PAGE = """
     const stepsSelect = document.getElementById('stepsSelect');
 
     let selectedFiles = [];
-    let image2imageTotalHeight = 0;
-    let defaultTextareaHeight = 0;
 
-    // ===== 动态高度调整逻辑（保持按钮位置稳定）=====
-    function calculateAndStoreImage2ImageTotalHeight() {
-        const isActive = uploadArea.classList.contains('active');
-        if (!isActive) {
-            uploadArea.classList.add('temp-measure');
-            uploadArea.style.display = 'block';
-        }
-        const uploadHeight = uploadArea.offsetHeight;
-        const textareaHeight = promptInput.offsetHeight;
-        if (!isActive) {
-            uploadArea.classList.remove('temp-measure');
-            uploadArea.style.display = '';
-        }
-        image2imageTotalHeight = uploadHeight + textareaHeight;
-    }
-
-    function setTextareaHeightForText2Image() {
-        if (defaultTextareaHeight === 0) {
-            defaultTextareaHeight = promptInput.offsetHeight;
-        }
-        const targetHeight = Math.max(image2imageTotalHeight, defaultTextareaHeight);
-        promptInput.style.height = targetHeight + 'px';
-    }
-
-    function adjustHeightBasedOnMode() {
-        const mode = document.querySelector('input[name="mode"]:checked').value;
-        if (mode === 'image2image') {
-            promptInput.style.height = 'auto';
-            calculateAndStoreImage2ImageTotalHeight();
-        } else {
-            if (image2imageTotalHeight === 0) calculateAndStoreImage2ImageTotalHeight();
-            setTextareaHeightForText2Image();
-        }
-    }
-
-    function onUploadAreaChange() {
-        if (uploadArea.classList.contains('active')) {
-            calculateAndStoreImage2ImageTotalHeight();
-            const mode = document.querySelector('input[name="mode"]:checked').value;
-            if (mode === 'text2image') setTextareaHeightForText2Image();
-        } else {
-            if (document.querySelector('input[name="mode"]:checked').value === 'text2image') {
-                calculateAndStoreImage2ImageTotalHeight();
-                setTextareaHeightForText2Image();
-            }
-        }
-    }
-
-    // 预览相关
+    // 图片预览相关
     function updatePreview() {
         previewContainer.innerHTML = '';
         selectedFiles.forEach((file, idx) => {
@@ -653,18 +578,15 @@ HTML_PAGE = """
                     selectedFiles.splice(idx, 1);
                     updatePreview();
                     syncFileInput();
-                    onUploadAreaChange();
                 };
                 const wrapper = document.createElement('div');
                 wrapper.className = 'preview-wrapper';
                 wrapper.appendChild(img);
                 wrapper.appendChild(delBtn);
                 previewContainer.appendChild(wrapper);
-                onUploadAreaChange();
             };
             reader.readAsDataURL(file);
         });
-        onUploadAreaChange();
     }
     function syncFileInput() {
         const dt = new DataTransfer();
@@ -680,28 +602,25 @@ HTML_PAGE = """
         });
         updatePreview();
         syncFileInput();
-        onUploadAreaChange();
     });
 
-    // 模式切换
+    // 模式切换（显示/隐藏上传区）
     function toggleUploadArea() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
         if (mode === 'image2image') uploadArea.classList.add('active');
         else uploadArea.classList.remove('active');
-        adjustHeightBasedOnMode();
     }
     modeRadios.forEach(r => r.addEventListener('change', toggleUploadArea));
 
-    // AI 开关
+    // AI优化开关
     function updateAIUI() {
         const isEnabled = aiToggle.checked;
         aiNoteDiv.classList.toggle('hidden-vis', !isEnabled);
         paramsPanel.classList.toggle('param-hidden', isEnabled);
-        adjustHeightBasedOnMode();
     }
     aiToggle.addEventListener('change', updateAIUI);
 
-    // 获取表单参数（用于普通生成）
+    // 表单数据获取
     function getFormData() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
         const prompt = promptInput.value.trim();
@@ -719,7 +638,7 @@ HTML_PAGE = """
         return formData;
     }
 
-    // 调用后端优化接口
+    // AI优化接口调用
     async function callOptimize(prompt, mode) {
         const resp = await fetch('/optimize', {
             method: 'POST',
@@ -731,9 +650,8 @@ HTML_PAGE = """
         return data;
     }
 
-    // 提交生成请求（含加载状态处理）
+    // 提交生成
     async function submitGenerate(formData) {
-        // 设置按钮为“生成中”状态
         generateBtn.disabled = true;
         generateBtn.textContent = '⏳ 生成中…';
         try {
@@ -746,14 +664,13 @@ HTML_PAGE = """
             document.write(html);
             document.close();
         } catch (err) {
-            // 出错时恢复按钮
             generateBtn.disabled = false;
             generateBtn.textContent = '✨ 生成图片';
             alert('生成失败: ' + err.message);
         }
     }
 
-    // 显示确认弹窗
+    // 确认弹窗
     function showConfirmModal(opt) {
         optPromptSpan.innerText = opt.optimized_prompt;
         optSizeSpan.innerText = opt.size;
@@ -764,7 +681,7 @@ HTML_PAGE = """
         modal.classList.add('active');
     }
 
-    // 生成按钮主逻辑
+    // 生成按钮点击事件
     generateBtn.addEventListener('click', async () => {
         const isAIOpt = aiToggle.checked;
         const rawFormData = getFormData();
@@ -773,10 +690,8 @@ HTML_PAGE = """
             return;
         }
         if (!isAIOpt) {
-            // 未启用优化，直接生成
             await submitGenerate(rawFormData);
         } else {
-            // 启用优化，先获取优化参数
             const mode = rawFormData.get('mode');
             const prompt = rawFormData.get('prompt');
             try {
@@ -797,7 +712,7 @@ HTML_PAGE = """
         }
     });
 
-    // 确认生成（优化后）
+    // 弹窗按钮事件
     modalConfirm.addEventListener('click', async () => {
         modal.classList.remove('active');
         if (!window.currentOptimized) return;
@@ -821,8 +736,6 @@ HTML_PAGE = """
     // 初始化
     toggleUploadArea();
     updateAIUI();
-    adjustHeightBasedOnMode();
-    window.addEventListener('resize', () => adjustHeightBasedOnMode());
 </script>
 </body>
 </html>
