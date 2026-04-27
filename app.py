@@ -201,6 +201,8 @@ def call_llm_for_optimization(user_prompt: str, mode: str):
     调用大模型，返回优化后的参数。
     返回格式：{"optimized_prompt": str, "style": str, "size": int, "steps": int, "num": int}
     """
+    if not ENABLE_LLM_OPT:
+        return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30, "num": 1}
     system_prompt = f"""你是一个专业的绘画提示词优化助手。
 用户输入一句大白话，你需要将它转换成适合高质量图像生成的参数。
 当前模式：{mode}（text2image 或 image2image）。
@@ -266,7 +268,7 @@ def call_llm_for_optimization(user_prompt: str, mode: str):
         return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30, "num": 1}
 
 # ===================================================================
-# 路由：前端页面（含完整交互逻辑）
+# 前端 HTML 模板（整合用户提供的稳定布局版本）
 # ===================================================================
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -276,79 +278,346 @@ HTML_PAGE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
     <title>AI画图工坊 · 智能优化</title>
     <style>
-        * { box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-blue: #3b82f6;
+            --primary-blue-hover: #2563eb;
+            --success-green: #86efac;
+            --success-green-deep: #22c55e;
+            --bg-light: #f5f7fb;
+            --bg-card: #ffffff;
+            --bg-gray-1: #f8fafc;
+            --bg-gray-2: #f1f5f9;
+            --border-gray: #cbd5e1;
+            --text-deep: #0f172a;
+            --text-gray: #475569;
+            --text-light: #5b6e8c;
+            --text-minor: #94a3b8;
+            --transition: 0.2s ease;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: #f5f7fb;
-            margin: 0;
+            background: var(--bg-light);
             min-height: 100vh;
             display: flex;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
             padding: 20px;
         }
+
         .card {
             max-width: 760px;
             width: 100%;
-            background: white;
+            background: var(--bg-card);
             border-radius: 40px;
             box-shadow: 0 12px 30px rgba(0,0,0,0.08);
-            padding: 28px 32px 36px;
+            padding: 28px 32px 24px;
+            display: flex;
+            flex-direction: column;
         }
-        h2 { font-size: 1.8rem; font-weight: 700; margin: 0 0 4px 0; color: #0f172a; }
-        .sub { color: #5b6e8c; margin-bottom: 24px; font-size: 0.9rem; border-left: 3px solid #cbd5e1; padding-left: 12px; }
-        .ai-placeholder { min-height: 64px; margin: 8px 0 12px 0; }
-        .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid #22c55e; margin: 0; }
-        .hidden { display: none; }
+
+        h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--text-deep);
+            margin-bottom: 4px;
+        }
+        .sub {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            border-left: 3px solid var(--border-gray);
+            padding-left: 12px;
+            margin-bottom: 24px;
+        }
+
+        .ai-placeholder {
+            min-height: 64px;
+            margin-bottom: 12px;
+        }
+        .ai-note {
+            background: #e6f7ec;
+            padding: 12px 18px;
+            border-radius: 24px;
+            font-size: 0.85rem;
+            color: #166534;
+            border-left: 4px solid var(--success-green-deep);
+            transition: opacity 0.2s;
+        }
+        .ai-note.hidden-vis {
+            visibility: hidden;
+            opacity: 0;
+        }
+
         .toggle-row {
-            display: flex; align-items: center; justify-content: space-between;
-            background: #f1f5f9; padding: 12px 20px; border-radius: 60px; margin-bottom: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-gray-2);
+            padding: 12px 20px;
+            border-radius: 60px;
+            margin-bottom: 28px;
         }
-        .toggle-label { font-weight: 600; font-size: 1rem; color: #0f172a; }
-        .toggle-switch { position: relative; display: inline-block; width: 52px; height: 28px; }
-        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-label {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--text-deep);
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 52px;
+            height: 28px;
+            flex-shrink: 0;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
         .slider {
-            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-            background-color: #cbd5e1; transition: 0.2s; border-radius: 28px;
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--border-gray);
+            transition: var(--transition);
+            border-radius: 28px;
         }
         .slider:before {
-            position: absolute; content: ""; height: 24px; width: 24px; left: 2px; bottom: 2px;
-            background-color: white; transition: 0.2s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            position: absolute;
+            content: "";
+            height: 24px;
+            width: 24px;
+            left: 2px;
+            bottom: 2px;
+            background: white;
+            transition: var(--transition);
+            border-radius: 50%;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-        input:checked + .slider { background-color: #86efac; }
-        input:checked + .slider:before { transform: translateX(24px); }
+        input:checked + .slider {
+            background: var(--success-green);
+        }
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+
         .mode-buttons {
-            display: flex; gap: 24px; margin-bottom: 24px;
-            background: #f8fafc; padding: 8px 16px; border-radius: 60px; width: fit-content;
+            display: flex;
+            gap: 24px;
+            margin-bottom: 24px;
+            background: var(--bg-gray-1);
+            padding: 10px 20px;
+            border-radius: 60px;
+            width: 100%;
+            justify-content: center;
+            flex-wrap: wrap;
         }
-        .mode-buttons label { display: flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer; }
-        .params-panel { background: #f8fafc; border-radius: 32px; padding: 18px 24px; margin-bottom: 24px; }
-        .param-row { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px; }
-        .param-group { flex: 1; min-width: 120px; }
-        .param-group label { display: block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: #475569; margin-bottom: 5px; }
-        select, input { width: 100%; padding: 8px 12px; border-radius: 28px; border: 1px solid #cbd5e1; background: white; font-size: 0.9rem; }
-        textarea { width: 100%; padding: 12px 16px; border-radius: 28px; border: 1px solid #cbd5e1; font-family: inherit; font-size: 0.95rem; resize: vertical; margin-bottom: 18px; }
-        .upload-section { background: #fef9e3; border-radius: 28px; padding: 16px 20px; margin-bottom: 18px; display: none; }
-        .upload-section.active { display: block; }
-        .preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-        .preview-img { width: 80px; height: 80px; object-fit: cover; border-radius: 16px; border: 1px solid #ddd; }
-        .btn-generate { background: #3b82f6; width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600; border: none; border-radius: 44px; color: white; cursor: pointer; margin-top: 6px; }
-        .btn-generate:hover { background: #2563eb; }
+        .mode-buttons label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            font-size: 1rem;
+        }
+        .mode-buttons input {
+            margin: 0;
+            transform: scale(1.1);
+        }
+
+        .params-panel {
+            background: var(--bg-gray-1);
+            border-radius: 32px;
+            padding: 18px 24px;
+            margin-bottom: 24px;
+            transition: visibility 0.2s, opacity 0.2s;
+        }
+        .params-panel.param-hidden {
+            visibility: hidden;
+            opacity: 0;
+        }
+        .param-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 16px;
+        }
+        .param-row:last-child {
+            margin-bottom: 0;
+        }
+        .param-group {
+            flex: 1;
+            min-width: 120px;
+        }
+        .param-group label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-gray);
+            margin-bottom: 5px;
+        }
+        select {
+            width: 100%;
+            padding: 8px 12px;
+            border-radius: 28px;
+            border: 1px solid var(--border-gray);
+            background: white;
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .upload-section {
+            background: #fef9e3;
+            border-radius: 28px;
+            padding: 16px 20px;
+            margin-bottom: 18px;
+            display: none;
+        }
+        .upload-section.active {
+            display: block;
+        }
+        .preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .preview-wrapper {
+            position: relative;
+        }
+        .preview-img {
+            width: 80px;
+            height: 80px;
+            object-fit: cover;
+            border-radius: 16px;
+            border: 1px solid #ddd;
+        }
+        .preview-del-btn {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 20px;
+            height: 20px;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 28px;
+            border: 1px solid var(--border-gray);
+            font-size: 0.95rem;
+            resize: vertical;
+            margin-bottom: 18px;
+            font-family: inherit;
+            outline: none;
+            transition: height 0.1s ease;
+        }
+        textarea:focus {
+            border-color: var(--primary-blue);
+        }
+
+        .btn-generate {
+            width: 100%;
+            padding: 14px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border: none;
+            border-radius: 44px;
+            background: var(--primary-blue);
+            color: white;
+            cursor: pointer;
+            margin-top: auto;
+            transition: var(--transition);
+        }
+        .btn-generate:hover {
+            background: var(--primary-blue-hover);
+        }
+
+        .footnote {
+            font-size: 0.7rem;
+            text-align: center;
+            color: var(--text-minor);
+            margin-top: 16px;
+        }
+
         .modal-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4);
-            backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center;
-            z-index: 1000; visibility: hidden; opacity: 0; transition: 0.2s;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            visibility: hidden;
+            opacity: 0;
+            transition: var(--transition);
         }
-        .modal-overlay.active { visibility: visible; opacity: 1; }
-        .modal-card { background: white; max-width: 500px; width: 90%; border-radius: 48px; padding: 28px; box-shadow: 0 25px 40px rgba(0,0,0,0.2); }
-        .modal-card h3 { margin-top: 0; font-size: 1.6rem; font-weight: 600; }
-        .modal-params { background: #f1f5f9; border-radius: 28px; padding: 18px; margin: 20px 0; }
-        .button-group { display: flex; gap: 12px; justify-content: flex-end; }
-        .btn-confirm { background: #86efac; border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
-        .btn-cancel { background: #cbd5e1; border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
-        .footnote { font-size: 0.7rem; text-align: center; color: #94a3b8; margin-top: 24px; }
-        .param-hidden { display: none; }
-        .loading-indicator { display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 12px 24px; border-radius: 40px; z-index: 2000; }
+        .modal-overlay.active {
+            visibility: visible;
+            opacity: 1;
+        }
+        .modal-card {
+            background: white;
+            max-width: 500px;
+            width: 90%;
+            border-radius: 48px;
+            padding: 28px;
+        }
+        .modal-card h3 {
+            font-size: 1.6rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .modal-params {
+            background: var(--bg-gray-2);
+            border-radius: 28px;
+            padding: 18px;
+            margin: 20px 0;
+            line-height: 1.6;
+        }
+        .button-group {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        .btn-confirm {
+            background: var(--success-green);
+            border: none;
+            padding: 8px 24px;
+            border-radius: 40px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-cancel {
+            background: var(--border-gray);
+            border: none;
+            padding: 8px 24px;
+            border-radius: 40px;
+            font-weight: 600;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -357,7 +626,9 @@ HTML_PAGE = """
     <div class="sub">自然语言绘图 · 智能增强</div>
 
     <div class="ai-placeholder">
-        <div id="aiNote" class="ai-note hidden">✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。</div>
+        <div id="aiNote" class="ai-note hidden-vis">
+            ✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。
+        </div>
     </div>
 
     <div class="toggle-row">
@@ -369,18 +640,48 @@ HTML_PAGE = """
     </div>
 
     <div class="mode-buttons">
-        <label><input type="radio" name="mode" value="text2image" checked> 🔘 文生图</label>
-        <label><input type="radio" name="mode" value="image2image"> 🔘 图生图</label>
+        <label><input type="radio" name="mode" value="text2image" checked> 文生图</label>
+        <label><input type="radio" name="mode" value="image2image"> 图生图</label>
     </div>
 
     <div id="paramsPanel" class="params-panel">
         <div class="param-row">
-            <div class="param-group"><label>📐 尺寸</label><select id="sizeSelect"><option value="256">256x256</option><option value="512" selected>512x512</option><option value="1024">1024x1024</option></select></div>
-            <div class="param-group"><label>🎨 风格</label><select id="styleSelect"><option value="realistic">写实</option><option value="anime">二次元</option><option value="digital-painting">数字绘画</option><option value="oil-painting">油画</option><option value="pixel-art">像素风</option></select></div>
+            <div class="param-group">
+                <label>📐 尺寸</label>
+                <select id="sizeSelect">
+                    <option value="256">256x256</option>
+                    <option value="512" selected>512x512</option>
+                    <option value="1024">1024x1024</option>
+                </select>
+            </div>
+            <div class="param-group">
+                <label>🎨 风格</label>
+                <select id="styleSelect">
+                    <option value="realistic">写实 (Realistic)</option>
+                    <option value="anime">二次元 (Anime)</option>
+                    <option value="digital-painting">数字绘画</option>
+                    <option value="oil-painting">油画</option>
+                    <option value="pixel-art">像素风</option>
+                </select>
+            </div>
         </div>
         <div class="param-row">
-            <div class="param-group"><label>🔢 数量</label><select id="numSelect"><option value="1">1张</option><option value="2">2张</option><option value="3">3张</option></select></div>
-            <div class="param-group"><label>⚙️ 细节步数</label><select id="stepsSelect"><option value="30">30 - 快速</option><option value="50" selected>50 - 标准</option><option value="100">100 - 高细节</option></select></div>
+            <div class="param-group">
+                <label>🔢 数量</label>
+                <select id="numSelect">
+                    <option value="1">1张</option>
+                    <option value="2">2张</option>
+                    <option value="3">3张</option>
+                </select>
+            </div>
+            <div class="param-group">
+                <label>⚙️ 细节步数</label>
+                <select id="stepsSelect">
+                    <option value="30">30 - 快速</option>
+                    <option value="50" selected>50 - 标准</option>
+                    <option value="100">100 - 高细节</option>
+                </select>
+            </div>
         </div>
     </div>
 
@@ -413,7 +714,6 @@ HTML_PAGE = """
         </div>
     </div>
 </div>
-<div id="loadingIndicator" class="loading-indicator">⏳ 生成中，请稍候...</div>
 
 <script>
     // DOM 元素
@@ -433,10 +733,63 @@ HTML_PAGE = """
     const optStyleSpan = document.getElementById('optStyle');
     const optNumSpan = document.getElementById('optNum');
     const optStepsSpan = document.getElementById('optSteps');
-    const loadingIndicator = document.getElementById('loadingIndicator');
+    const promptInput = document.getElementById('promptInput');
+    const sizeSelect = document.getElementById('sizeSelect');
+    const styleSelect = document.getElementById('styleSelect');
+    const numSelect = document.getElementById('numSelect');
+    const stepsSelect = document.getElementById('stepsSelect');
 
     let selectedFiles = [];
-    let currentOptimizedParams = null;  // 存储优化后的参数，用于确认生成
+    let image2imageTotalHeight = 0;
+    let defaultTextareaHeight = 0;
+
+    // ===== 动态高度调整逻辑（保持按钮位置稳定）=====
+    function calculateAndStoreImage2ImageTotalHeight() {
+        const isActive = uploadArea.classList.contains('active');
+        if (!isActive) {
+            uploadArea.classList.add('temp-measure');
+            uploadArea.style.display = 'block';
+        }
+        const uploadHeight = uploadArea.offsetHeight;
+        const textareaHeight = promptInput.offsetHeight;
+        if (!isActive) {
+            uploadArea.classList.remove('temp-measure');
+            uploadArea.style.display = '';
+        }
+        image2imageTotalHeight = uploadHeight + textareaHeight;
+    }
+
+    function setTextareaHeightForText2Image() {
+        if (defaultTextareaHeight === 0) {
+            defaultTextareaHeight = promptInput.offsetHeight;
+        }
+        const targetHeight = Math.max(image2imageTotalHeight, defaultTextareaHeight);
+        promptInput.style.height = targetHeight + 'px';
+    }
+
+    function adjustHeightBasedOnMode() {
+        const mode = document.querySelector('input[name="mode"]:checked').value;
+        if (mode === 'image2image') {
+            promptInput.style.height = 'auto';
+            calculateAndStoreImage2ImageTotalHeight();
+        } else {
+            if (image2imageTotalHeight === 0) calculateAndStoreImage2ImageTotalHeight();
+            setTextareaHeightForText2Image();
+        }
+    }
+
+    function onUploadAreaChange() {
+        if (uploadArea.classList.contains('active')) {
+            calculateAndStoreImage2ImageTotalHeight();
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            if (mode === 'text2image') setTextareaHeightForText2Image();
+        } else {
+            if (document.querySelector('input[name="mode"]:checked').value === 'text2image') {
+                calculateAndStoreImage2ImageTotalHeight();
+                setTextareaHeightForText2Image();
+            }
+        }
+    }
 
     // 预览相关
     function updatePreview() {
@@ -449,26 +802,23 @@ HTML_PAGE = """
                 img.className = 'preview-img';
                 const delBtn = document.createElement('button');
                 delBtn.innerText = '✕';
-                delBtn.style.position = 'relative';
-                delBtn.style.marginLeft = '-24px';
-                delBtn.style.background = 'rgba(0,0,0,0.5)';
-                delBtn.style.color = 'white';
-                delBtn.style.border = 'none';
-                delBtn.style.borderRadius = '20px';
-                delBtn.style.cursor = 'pointer';
+                delBtn.className = 'preview-del-btn';
                 delBtn.onclick = () => {
                     selectedFiles.splice(idx, 1);
                     updatePreview();
                     syncFileInput();
+                    onUploadAreaChange();
                 };
                 const wrapper = document.createElement('div');
-                wrapper.style.position = 'relative';
+                wrapper.className = 'preview-wrapper';
                 wrapper.appendChild(img);
                 wrapper.appendChild(delBtn);
                 previewContainer.appendChild(wrapper);
+                onUploadAreaChange();
             };
             reader.readAsDataURL(file);
         });
+        onUploadAreaChange();
     }
     function syncFileInput() {
         const dt = new DataTransfer();
@@ -484,6 +834,7 @@ HTML_PAGE = """
         });
         updatePreview();
         syncFileInput();
+        onUploadAreaChange();
     });
 
     // 模式切换
@@ -491,143 +842,144 @@ HTML_PAGE = """
         const mode = document.querySelector('input[name="mode"]:checked').value;
         if (mode === 'image2image') uploadArea.classList.add('active');
         else uploadArea.classList.remove('active');
+        adjustHeightBasedOnMode();
     }
-    modeRadios.forEach(radio => radio.addEventListener('change', toggleUploadArea));
-    toggleUploadArea();
+    modeRadios.forEach(r => r.addEventListener('change', toggleUploadArea));
 
-    // AI 开关UI
+    // AI 开关
     function updateAIUI() {
-        const enabled = aiToggle.checked;
-        if (enabled) {
-            aiNoteDiv.classList.remove('hidden');
-            paramsPanel.classList.add('param-hidden');
-        } else {
-            aiNoteDiv.classList.add('hidden');
-            paramsPanel.classList.remove('param-hidden');
-        }
+        const isEnabled = aiToggle.checked;
+        aiNoteDiv.classList.toggle('hidden-vis', !isEnabled);
+        paramsPanel.classList.toggle('param-hidden', isEnabled);
+        adjustHeightBasedOnMode();
     }
     aiToggle.addEventListener('change', updateAIUI);
-    updateAIUI();
 
-    // 通用获取表单数据（不含文件）
+    // 获取表单参数（用于普通生成）
     function getFormData() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
-        const prompt = document.getElementById('promptInput').value.trim();
-        if (!prompt) { alert("请输入提示词"); return null; }
-        const size = document.getElementById('sizeSelect')?.value || "512";
-        const style = document.getElementById('styleSelect')?.value || "realistic";
-        const num = document.getElementById('numSelect')?.value || "1";
-        const steps = document.getElementById('stepsSelect')?.value || "50";
-        return { mode, prompt, size, style, num, steps };
-    }
-
-    // 显示加载动画
-    function showLoading() { loadingIndicator.style.display = 'block'; }
-    function hideLoading() { loadingIndicator.style.display = 'none'; }
-
-    // 生成图片（最终提交）
-    async function submitGenerate(params) {
+        const prompt = promptInput.value.trim();
+        if (!prompt) return null;
         const formData = new FormData();
-        formData.append('mode', params.mode);
-        formData.append('prompt', params.prompt);
-        formData.append('size', params.size);
-        formData.append('style', params.style);
-        formData.append('num', params.num);
-        formData.append('steps', params.steps);
+        formData.append('mode', mode);
+        formData.append('prompt', prompt);
+        formData.append('size', sizeSelect.value);
+        formData.append('style', styleSelect.value);
+        formData.append('num', numSelect.value);
+        formData.append('steps', stepsSelect.value);
         for (let file of selectedFiles) {
             formData.append('image_files', file);
         }
-        showLoading();
-        try {
-            const resp = await fetch('/generate', { method: 'POST', body: formData });
-            const html = await resp.text();
-            // 替换整个页面以显示结果
-            document.open();
-            document.write(html);
-            document.close();
-        } catch (err) {
-            alert("生成失败：" + err);
-            hideLoading();
+        return formData;
+    }
+
+    // 调用后端优化接口
+    async function callOptimize(prompt, mode) {
+        const resp = await fetch('/optimize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, mode })
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error);
+        return data;
+    }
+
+    // 提交生成请求（普通或优化后）
+    async function submitGenerate(formData) {
+        const resp = await fetch('/generate', { method: 'POST', body: formData });
+        const html = await resp.text();
+        document.open();
+        document.write(html);
+        document.close();
+    }
+
+    // 显示确认弹窗
+    function showConfirmModal(opt) {
+        optPromptSpan.innerText = opt.optimized_prompt;
+        optSizeSpan.innerText = opt.size;
+        const styleMap = { 'realistic':'写实', 'anime':'二次元', 'digital-painting':'数字绘画', 'oil-painting':'油画', 'pixel-art':'像素风' };
+        optStyleSpan.innerText = styleMap[opt.style] || opt.style;
+        optNumSpan.innerText = opt.num;
+        optStepsSpan.innerText = opt.steps;
+        modal.classList.add('active');
+    }
+
+    // 生成按钮主逻辑
+    generateBtn.addEventListener('click', async () => {
+        const isAIOpt = aiToggle.checked;
+        const rawFormData = getFormData();
+        if (!rawFormData) {
+            alert("请输入提示词");
+            return;
         }
-    }
-
-    // 普通模式：直接生成
-    async function normalGenerate() {
-        const data = getFormData();
-        if (!data) return;
-        await submitGenerate(data);
-    }
-
-    // AI优化模式：先获取优化参数，弹窗确认后再生成
-    async function aiOptimizeAndConfirm() {
-        const data = getFormData();
-        if (!data) return;
-        showLoading();
-        try {
-            const resp = await fetch('/optimize', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: data.prompt, mode: data.mode })
-            });
-            const opt = await resp.json();
-            if (!opt.success) throw new Error(opt.error);
-            currentOptimizedParams = {
-                mode: data.mode,
-                prompt: opt.optimized_prompt,
-                size: opt.size,
-                style: opt.style,
-                num: opt.num,
-                steps: opt.steps
-            };
-            // 填充弹窗
-            optPromptSpan.innerText = currentOptimizedParams.prompt;
-            optSizeSpan.innerText = currentOptimizedParams.size;
-            const styleMap = { 'realistic':'写实', 'anime':'二次元', 'digital-painting':'数字绘画', 'oil-painting':'油画', 'pixel-art':'像素风' };
-            optStyleSpan.innerText = styleMap[currentOptimizedParams.style] || currentOptimizedParams.style;
-            optNumSpan.innerText = currentOptimizedParams.num;
-            optStepsSpan.innerText = currentOptimizedParams.steps;
-            modal.classList.add('active');
-            hideLoading();
-        } catch (err) {
-            alert("优化失败：" + err);
-            hideLoading();
-        }
-    }
-
-    // 生成按钮点击处理
-    generateBtn.addEventListener('click', () => {
-        if (aiToggle.checked) {
-            aiOptimizeAndConfirm();
+        if (!isAIOpt) {
+            // 未启用优化，直接生成
+            await submitGenerate(rawFormData);
         } else {
-            normalGenerate();
+            // 启用优化，先获取优化参数
+            const mode = rawFormData.get('mode');
+            const prompt = rawFormData.get('prompt');
+            try {
+                const optResult = await callOptimize(prompt, mode);
+                // 存储优化参数，确认时使用
+                window.currentOptimized = {
+                    mode,
+                    optimized_prompt: optResult.optimized_prompt,
+                    size: optResult.size,
+                    style: optResult.style,
+                    num: optResult.num,
+                    steps: optResult.steps,
+                    image_files: selectedFiles.slice()   // 保存文件列表
+                };
+                showConfirmModal(window.currentOptimized);
+            } catch (err) {
+                alert("优化失败：" + err.message);
+            }
         }
     });
 
-    // 弹窗按钮
-    modalCancel.addEventListener('click', () => { modal.classList.remove('active'); });
+    // 确认生成（优化后）
     modalConfirm.addEventListener('click', async () => {
         modal.classList.remove('active');
-        if (currentOptimizedParams) {
-            await submitGenerate(currentOptimizedParams);
-        } else {
-            alert("优化参数丢失，请重试");
+        if (!window.currentOptimized) return;
+        const opt = window.currentOptimized;
+        const formData = new FormData();
+        formData.append('mode', opt.mode);
+        formData.append('prompt', opt.optimized_prompt);
+        formData.append('size', opt.size);
+        formData.append('style', opt.style);
+        formData.append('num', opt.num);
+        formData.append('steps', opt.steps);
+        for (let file of opt.image_files) {
+            formData.append('image_files', file);
         }
+        await submitGenerate(formData);
+        window.currentOptimized = null;
     });
+    modalCancel.addEventListener('click', () => modal.classList.remove('active'));
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
+
+    // 初始化
+    toggleUploadArea();
+    updateAIUI();
+    adjustHeightBasedOnMode();
+    window.addEventListener('resize', () => adjustHeightBasedOnMode());
 </script>
 </body>
 </html>
 """
 
+# ===================================================================
+# Flask 路由
+# ===================================================================
 @app.route("/", methods=["GET"])
 def index():
     return render_template_string(HTML_PAGE)
 
-# ===================================================================
-# API 路由：优化参数
-# ===================================================================
 @app.route("/optimize", methods=["POST"])
 def optimize():
+    """接收原始提示词，返回大模型优化后的参数"""
     if not ENABLE_LLM_OPT:
         return jsonify({"success": False, "error": "大模型未配置"}), 400
     data = request.get_json()
@@ -648,11 +1000,9 @@ def optimize():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
-# ===================================================================
-# API 路由：生成图片（最终）
-# ===================================================================
 @app.route("/generate", methods=["POST"])
 def generate():
+    """接收表单参数，调用绘图API并返回结果页面"""
     mode = request.form.get("mode")
     prompt = request.form.get("prompt")
     size = request.form.get("size")
@@ -662,15 +1012,16 @@ def generate():
     image_files = request.files.getlist("image_files") if mode == "image2image" else []
 
     if not prompt:
-        return render_template_string(HTML_PAGE, error="提示词不能为空", enable_llm=ENABLE_LLM_OPT)
+        return render_template_string(HTML_PAGE, error="提示词不能为空")
     try:
         results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
-        return render_template_string(HTML_PAGE, image_results=results, enable_llm=ENABLE_LLM_OPT)
+        # 渲染结果页面（复用同一模板，传递结果）
+        return render_template_string(HTML_PAGE, image_results=results)
     except Exception as e:
-        return render_template_string(HTML_PAGE, error=f"生成失败: {e}", enable_llm=ENABLE_LLM_OPT)
+        return render_template_string(HTML_PAGE, error=f"生成失败: {e}")
 
 # ===================================================================
-# 启动 Flask 应用
+# 启动应用
 # ===================================================================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
