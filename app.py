@@ -268,7 +268,7 @@ def call_llm_for_optimization(user_prompt: str, mode: str):
         return {"optimized_prompt": user_prompt, "style": "realistic", "size": 512, "steps": 30, "num": 1}
 
 # ===================================================================
-# 前端 HTML 模板（已补全结果展示和错误信息）
+# 前端 HTML 模板（已补全加载状态、结果展示和错误信息）
 # ===================================================================
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -550,6 +550,10 @@ HTML_PAGE = """
         .btn-generate:hover {
             background: var(--primary-blue-hover);
         }
+        .btn-generate:disabled {
+            background: #94a3b8;
+            cursor: not-allowed;
+        }
 
         .footnote {
             font-size: 0.7rem;
@@ -771,7 +775,7 @@ HTML_PAGE = """
     <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
     <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
 
-    <!-- ===== 新增：生成结果展示区域 ===== -->
+    <!-- ===== 生成结果展示区域 ===== -->
     {% if image_results %}
     <div class="results-section">
         <div class="results-title">🖼️ 生成结果</div>
@@ -996,13 +1000,26 @@ HTML_PAGE = """
         return data;
     }
 
-    // 提交生成请求（普通或优化后）
+    // 提交生成请求（含加载状态处理）
     async function submitGenerate(formData) {
-        const resp = await fetch('/generate', { method: 'POST', body: formData });
-        const html = await resp.text();
-        document.open();
-        document.write(html);
-        document.close();
+        // 设置按钮为“生成中”状态
+        generateBtn.disabled = true;
+        generateBtn.textContent = '⏳ 生成中…';
+        try {
+            const resp = await fetch('/generate', { method: 'POST', body: formData });
+            if (!resp.ok) {
+                throw new Error(`服务器错误：${resp.status}`);
+            }
+            const html = await resp.text();
+            document.open();
+            document.write(html);
+            document.close();
+        } catch (err) {
+            // 出错时恢复按钮
+            generateBtn.disabled = false;
+            generateBtn.textContent = '✨ 生成图片';
+            alert('生成失败: ' + err.message);
+        }
     }
 
     // 显示确认弹窗
@@ -1025,7 +1042,7 @@ HTML_PAGE = """
             return;
         }
         if (!isAIOpt) {
-            // 未启用优化，直接生成
+            // 未启用优化，直接生成（submitGenerate 会统一处理加载状态）
             await submitGenerate(rawFormData);
         } else {
             // 启用优化，先获取优化参数
@@ -1041,7 +1058,7 @@ HTML_PAGE = """
                     style: optResult.style,
                     num: optResult.num,
                     steps: optResult.steps,
-                    image_files: selectedFiles.slice()   // 保存文件列表
+                    image_files: selectedFiles.slice()
                 };
                 showConfirmModal(window.currentOptimized);
             } catch (err) {
@@ -1050,7 +1067,7 @@ HTML_PAGE = """
         }
     });
 
-    // 确认生成（优化后）
+    // 确认生成（优化后）—— 同样处理加载状态
     modalConfirm.addEventListener('click', async () => {
         modal.classList.remove('active');
         if (!window.currentOptimized) return;
@@ -1065,6 +1082,7 @@ HTML_PAGE = """
         for (let file of opt.image_files) {
             formData.append('image_files', file);
         }
+        // submitGenerate 会处理按钮状态和错误恢复
         await submitGenerate(formData);
         window.currentOptimized = null;
     });
@@ -1126,7 +1144,6 @@ def generate():
         return render_template_string(HTML_PAGE, error="提示词不能为空")
     try:
         results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
-        # 渲染结果页面（复用同一模板，传递结果）
         return render_template_string(HTML_PAGE, image_results=results)
     except Exception as e:
         return render_template_string(HTML_PAGE, error=f"生成失败: {e}")
