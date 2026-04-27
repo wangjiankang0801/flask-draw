@@ -6,10 +6,17 @@ HTML_PAGE = """
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>AI画图工坊 · 智能优化</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%;
+            /* 关键：固定html和body高度，适配移动端动态视口 */
+            height: 100%;
+            min-height: 100dvh;
+            overflow: hidden;
+        }
         :root {
             --primary-blue: #3b82f6;
             --primary-blue-hover: #2563eb;
@@ -29,12 +36,11 @@ HTML_PAGE = """
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background: var(--bg-light);
-            min-height: 100vh;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-start;
-            /* 固定上下边距，底部适配全面屏安全区 */
+            justify-content: center;
+            /* 上下固定边距，底部适配全面屏安全区 */
             padding: 20px 20px max(20px, env(safe-area-inset-bottom)) 20px;
             margin: 0;
         }
@@ -47,23 +53,37 @@ HTML_PAGE = """
             padding: 28px 32px 24px;
             display: flex;
             flex-direction: column;
-            /* 关键：固定卡片高度，占满屏幕可用空间，底部位置永远不变 */
-            min-height: calc(100vh - 40px);
+            /* 关键：固定卡片高度，永远等于手机可视区域高度，不会溢出 */
+            height: calc(100dvh - 40px);
+            max-height: calc(100dvh - 40px);
+            min-height: 0;
             flex-shrink: 0;
         }
-        /* 新增：中间内容包裹层，自动占满剩余空间，不影响底部布局 */
+        /* 中间内容包裹层：自动占满剩余空间，内容过多时滚动，不影响底部 */
         .content-wrapper {
             flex: 1;
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            overflow-x: hidden;
             padding-bottom: 16px;
+            /* 适配iOS顺滑滚动 */
+            -webkit-overflow-scrolling: touch;
+        }
+        /* 隐藏滚动条，不影响滚动体验 */
+        .content-wrapper::-webkit-scrollbar {
+            display: none;
+        }
+        .content-wrapper {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
         h2 {
             font-size: 1.8rem;
             font-weight: 700;
             color: var(--text-deep);
             margin-bottom: 4px;
+            flex-shrink: 0;
         }
         .sub {
             font-size: 0.9rem;
@@ -71,10 +91,12 @@ HTML_PAGE = """
             border-left: 3px solid var(--border-gray);
             padding-left: 12px;
             margin-bottom: 24px;
+            flex-shrink: 0;
         }
         .ai-placeholder {
             min-height: 64px;
             margin-bottom: 12px;
+            flex-shrink: 0;
         }
         .ai-note {
             background: #e6f7ec;
@@ -97,6 +119,7 @@ HTML_PAGE = """
             padding: 12px 20px;
             border-radius: 60px;
             margin-bottom: 28px;
+            flex-shrink: 0;
         }
         .toggle-label {
             font-weight: 600;
@@ -154,6 +177,7 @@ HTML_PAGE = """
             width: 100%;
             justify-content: center;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
         .mode-buttons label {
             display: inline-flex;
@@ -174,10 +198,15 @@ HTML_PAGE = """
             padding: 18px 24px;
             margin-bottom: 24px;
             transition: visibility 0.2s, opacity 0.2s;
+            flex-shrink: 0;
         }
         .params-panel.param-hidden {
             visibility: hidden;
             opacity: 0;
+            height: 0;
+            padding: 0;
+            margin: 0;
+            overflow: hidden;
         }
         .param-row {
             display: flex;
@@ -215,6 +244,7 @@ HTML_PAGE = """
             padding: 16px 20px;
             margin-bottom: 18px;
             display: none;
+            flex-shrink: 0;
         }
         .upload-section.active {
             display: block;
@@ -255,15 +285,18 @@ HTML_PAGE = """
             border-radius: 28px;
             border: 1px solid var(--border-gray);
             font-size: 0.95rem;
-            resize: vertical;
+            /* 移动端禁止拉伸，避免布局错乱 */
+            resize: none;
             margin-bottom: 0;
             font-family: inherit;
             outline: none;
             transition: height 0.1s ease;
+            flex-shrink: 0;
         }
         textarea:focus {
             border-color: var(--primary-blue);
         }
+        /* 底部固定区域：永远在卡片最底部，两个模式位置完全一致 */
         .btn-generate {
             width: 100%;
             padding: 14px;
@@ -276,6 +309,7 @@ HTML_PAGE = """
             cursor: pointer;
             margin-top: 18px;
             transition: var(--transition);
+            flex-shrink: 0;
         }
         .btn-generate:hover {
             background: var(--primary-blue-hover);
@@ -289,6 +323,7 @@ HTML_PAGE = """
             text-align: center;
             color: var(--text-minor);
             margin-top: 16px;
+            flex-shrink: 0;
         }
         .results-section {
             margin-top: 28px;
@@ -424,7 +459,7 @@ HTML_PAGE = """
 </head>
 <body>
 <div class="card">
-    <!-- 中间所有内容都包裹在content-wrapper里，自动适配高度 -->
+    <!-- 中间所有内容都包裹在这里，自动适配高度，超出可滚动 -->
     <div class="content-wrapper">
         <h2>🎨 AI画图工坊</h2>
         <div class="sub">自然语言绘图 · 智能增强</div>
@@ -498,7 +533,7 @@ HTML_PAGE = """
         <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
     </div>
 
-    <!-- 底部固定区域，永远在卡片最底部，两个模式位置完全一致 -->
+    <!-- 底部固定区域，永远在同一个位置，不受内容影响 -->
     <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
     <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
 </div>
