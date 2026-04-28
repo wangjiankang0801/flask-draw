@@ -12,7 +12,6 @@ HTML_PAGE = """
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             width: 100%;
-            /* 关键：固定html和body高度，适配移动端动态视口 */
             height: 100%;
             min-height: 100dvh;
             overflow: hidden;
@@ -40,7 +39,6 @@ HTML_PAGE = """
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            /* 上下固定边距，底部适配全面屏安全区 */
             padding: 20px 20px max(20px, env(safe-area-inset-bottom)) 20px;
             margin: 0;
         }
@@ -53,13 +51,11 @@ HTML_PAGE = """
             padding: 28px 32px 24px;
             display: flex;
             flex-direction: column;
-            /* 关键：固定卡片高度，永远等于手机可视区域高度，不会溢出 */
             height: calc(100dvh - 40px);
             max-height: calc(100dvh - 40px);
             min-height: 0;
             flex-shrink: 0;
         }
-        /* 中间内容包裹层：自动占满剩余空间，内容过多时滚动，不影响底部 */
         .content-wrapper {
             flex: 1;
             display: flex;
@@ -67,10 +63,8 @@ HTML_PAGE = """
             overflow-y: auto;
             overflow-x: hidden;
             padding-bottom: 16px;
-            /* 适配iOS顺滑滚动 */
             -webkit-overflow-scrolling: touch;
         }
-        /* 隐藏滚动条，不影响滚动体验 */
         .content-wrapper::-webkit-scrollbar {
             display: none;
         }
@@ -93,373 +87,63 @@ HTML_PAGE = """
             margin-bottom: 24px;
             flex-shrink: 0;
         }
-        .ai-placeholder {
-            min-height: 64px;
-            margin-bottom: 12px;
-            flex-shrink: 0;
-        }
-        .ai-note {
-            background: #e6f7ec;
-            padding: 12px 18px;
-            border-radius: 24px;
-            font-size: 0.85rem;
-            color: #166534;
-            border-left: 4px solid var(--success-green-deep);
-            transition: opacity 0.2s;
-        }
-        .ai-note.hidden-vis {
-            visibility: hidden;
-            opacity: 0;
-        }
-        .toggle-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: var(--bg-gray-2);
-            padding: 12px 20px;
-            border-radius: 60px;
-            margin-bottom: 28px;
-            flex-shrink: 0;
-        }
-        .toggle-label {
-            font-weight: 600;
-            font-size: 1rem;
-            color: var(--text-deep);
-        }
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 52px;
-            height: 28px;
-            flex-shrink: 0;
-        }
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: var(--border-gray);
-            transition: var(--transition);
-            border-radius: 28px;
-        }
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 24px;
-            width: 24px;
-            left: 2px;
-            bottom: 2px;
-            background: white;
-            transition: var(--transition);
-            border-radius: 50%;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-        }
-        input:checked + .slider {
-            background: var(--success-green);
-        }
-        input:checked + .slider:before {
-            transform: translateX(24px);
-        }
-        .mode-buttons {
-            display: flex;
-            gap: 24px;
-            margin-bottom: 24px;
-            background: var(--bg-gray-1);
-            padding: 10px 20px;
-            border-radius: 60px;
-            width: 100%;
-            justify-content: center;
-            flex-wrap: wrap;
-            flex-shrink: 0;
-        }
-        .mode-buttons label {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-weight: 500;
-            cursor: pointer;
-            white-space: nowrap;
-            font-size: 1rem;
-        }
-        .mode-buttons input {
-            margin: 0;
-            transform: scale(1.1);
-        }
-        .params-panel {
-            background: var(--bg-gray-1);
-            border-radius: 32px;
-            padding: 18px 24px;
-            margin-bottom: 24px;
-            transition: visibility 0.2s, opacity 0.2s;
-            flex-shrink: 0;
-        }
-        .params-panel.param-hidden {
-            visibility: hidden;
-            opacity: 0;
-            height: 0;
-            padding: 0;
-            margin: 0;
-            overflow: hidden;
-        }
-        .param-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 20px;
-            margin-bottom: 16px;
-        }
-        .param-row:last-child {
-            margin-bottom: 0;
-        }
-        .param-group {
-            flex: 1;
-            min-width: 120px;
-        }
-        .param-group label {
-            display: block;
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            color: var(--text-gray);
-            margin-bottom: 5px;
-        }
-        select {
-            width: 100%;
-            padding: 8px 12px;
-            border-radius: 28px;
-            border: 1px solid var(--border-gray);
-            background: white;
-            font-size: 0.9rem;
-            outline: none;
-        }
-        .upload-section {
-            background: #fef9e3;
-            border-radius: 28px;
-            padding: 16px 20px;
-            margin-bottom: 18px;
-            display: none;
-            flex-shrink: 0;
-        }
-        .upload-section.active {
-            display: block;
-        }
-        .preview-container {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 12px;
-        }
-        .preview-wrapper {
-            position: relative;
-        }
-        .preview-img {
-            width: 80px;
-            height: 80px;
-            object-fit: cover;
-            border-radius: 16px;
-            border: 1px solid #ddd;
-        }
-        .preview-del-btn {
-            position: absolute;
-            top: 2px;
-            right: 2px;
-            width: 20px;
-            height: 20px;
-            background: rgba(0,0,0,0.5);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            cursor: pointer;
-            font-size: 12px;
-            line-height: 1;
-        }
-        textarea {
-            width: 100%;
-            padding: 12px 16px;
-            border-radius: 28px;
-            border: 1px solid var(--border-gray);
-            font-size: 0.95rem;
-            /* 移动端禁止拉伸，避免布局错乱 */
-            resize: none;
-            margin-bottom: 0;
-            font-family: inherit;
-            outline: none;
-            transition: height 0.1s ease;
-            flex-shrink: 0;
-        }
-        textarea:focus {
-            border-color: var(--primary-blue);
-        }
-        /* 底部固定区域：永远在卡片最底部，两个模式位置完全一致 */
-        .btn-generate {
-            width: 100%;
-            padding: 14px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            border: none;
-            border-radius: 44px;
-            background: var(--primary-blue);
-            color: white;
-            cursor: pointer;
-            margin-top: 18px;
-            transition: var(--transition);
-            flex-shrink: 0;
-        }
-        .btn-generate:hover {
-            background: var(--primary-blue-hover);
-        }
-        .btn-generate:disabled {
-            background: #94a3b8;
-            cursor: not-allowed;
-        }
-        .footnote {
-            font-size: 0.7rem;
-            text-align: center;
-            color: var(--text-minor);
-            margin-top: 16px;
-            flex-shrink: 0;
-        }
-        .results-section {
-            margin-top: 28px;
-            border-top: 1px solid var(--border-gray);
-            padding-top: 24px;
-        }
-        .results-title {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--text-deep);
-        }
-        .results-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-        .result-card {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .result-img {
-            width: 200px;
-            height: 200px;
-            object-fit: cover;
-            border-radius: 20px;
-            border: 1px solid var(--border-gray);
-            cursor: pointer;
-            transition: transform 0.15s;
-        }
-        .result-img:hover {
-            transform: scale(1.02);
-        }
-        .catbox-link {
-            font-size: 0.75rem;
-            color: var(--primary-blue);
-            margin-top: 6px;
-            text-decoration: none;
-        }
-        .catbox-link:hover {
-            text-decoration: underline;
-        }
-        .error-message {
-            margin-top: 20px;
-            padding: 14px 18px;
-            background: #fee2e2;
-            border-radius: 24px;
-            color: #b91c1c;
-            font-weight: 500;
-            border-left: 4px solid #ef4444;
-        }
-        .image-modal {
-            display: none;
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            z-index: 9999;
-            justify-content: center;
-            align-items: center;
-        }
-        .image-modal.active {
-            display: flex;
-        }
-        .image-modal img {
-            max-width: 90vw;
-            max-height: 90vh;
-            border-radius: 20px;
-            box-shadow: 0 0 30px rgba(0,0,0,0.5);
-        }
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.4);
-            backdrop-filter: blur(4px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            visibility: hidden;
-            opacity: 0;
-            transition: var(--transition);
-        }
-        .modal-overlay.active {
-            visibility: visible;
-            opacity: 1;
-        }
-        .modal-card {
-            background: white;
-            max-width: 500px;
-            width: 90%;
-            border-radius: 48px;
-            padding: 28px;
-        }
-        .modal-card h3 {
-            font-size: 1.6rem;
-            font-weight: 600;
-            margin-bottom: 16px;
-        }
-        .modal-params {
-            background: var(--bg-gray-2);
-            border-radius: 28px;
-            padding: 18px;
-            margin: 20px 0;
-            line-height: 1.6;
-        }
-        .button-group {
-            display: flex;
-            gap: 12px;
-            justify-content: flex-end;
-        }
-        .btn-confirm {
-            background: var(--success-green);
-            border: none;
-            padding: 8px 24px;
-            border-radius: 40px;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .btn-cancel {
-            background: var(--border-gray);
-            border: none;
-            padding: 8px 24px;
-            border-radius: 40px;
-            font-weight: 600;
-            cursor: pointer;
-        }
+        .ai-placeholder { min-height: 64px; margin-bottom: 12px; flex-shrink: 0; }
+        .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid var(--success-green-deep); transition: opacity 0.2s; }
+        .ai-note.hidden-vis { visibility: hidden; opacity: 0; }
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; background: var(--bg-gray-2); padding: 12px 20px; border-radius: 60px; margin-bottom: 28px; flex-shrink: 0; }
+        .toggle-label { font-weight: 600; font-size: 1rem; color: var(--text-deep); }
+        .toggle-switch { position: relative; display: inline-block; width: 52px; height: 28px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--border-gray); transition: var(--transition); border-radius: 28px; }
+        .slider:before { position: absolute; content: ""; height: 24px; width: 24px; left: 2px; bottom: 2px; background: white; transition: var(--transition); border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        input:checked + .slider { background: var(--success-green); }
+        input:checked + .slider:before { transform: translateX(24px); }
+        .mode-buttons { display: flex; gap: 24px; margin-bottom: 24px; background: var(--bg-gray-1); padding: 10px 20px; border-radius: 60px; width: 100%; justify-content: center; flex-wrap: wrap; flex-shrink: 0; }
+        .mode-buttons label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; white-space: nowrap; font-size: 1rem; }
+        .mode-buttons input { margin: 0; transform: scale(1.1); }
+        .params-panel { background: var(--bg-gray-1); border-radius: 32px; padding: 18px 24px; margin-bottom: 24px; transition: visibility 0.2s, opacity 0.2s; flex-shrink: 0; }
+        .params-panel.param-hidden { visibility: hidden; opacity: 0; height: 0; padding: 0; margin: 0; overflow: hidden; }
+        .param-row { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px; }
+        .param-row:last-child { margin-bottom: 0; }
+        .param-group { flex: 1; min-width: 120px; }
+        .param-group label { display: block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: var(--text-gray); margin-bottom: 5px; }
+        select { width: 100%; padding: 8px 12px; border-radius: 28px; border: 1px solid var(--border-gray); background: white; font-size: 0.9rem; outline: none; }
+        .upload-section { background: #fef9e3; border-radius: 28px; padding: 16px 20px; margin-bottom: 18px; display: none; flex-shrink: 0; }
+        .upload-section.active { display: block; }
+        .preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+        .preview-wrapper { position: relative; }
+        .preview-img { width: 80px; height: 80px; object-fit: cover; border-radius: 16px; border: 1px solid #ddd; }
+        .preview-del-btn { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; background: rgba(0,0,0,0.5); color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 1; }
+        textarea { width: 100%; padding: 12px 16px; border-radius: 28px; border: 1px solid var(--border-gray); font-size: 0.95rem; resize: none; margin-bottom: 0; font-family: inherit; outline: none; transition: height 0.1s ease; flex-shrink: 0; }
+        textarea:focus { border-color: var(--primary-blue); }
+        .btn-generate { width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600; border: none; border-radius: 44px; background: var(--primary-blue); color: white; cursor: pointer; margin-top: 18px; transition: var(--transition); flex-shrink: 0; }
+        .btn-generate:hover { background: var(--primary-blue-hover); }
+        .btn-generate:disabled { background: #94a3b8; cursor: not-allowed; }
+        .footnote { font-size: 0.7rem; text-align: center; color: var(--text-minor); margin-top: 16px; flex-shrink: 0; }
+        .results-section { margin-top: 28px; border-top: 1px solid var(--border-gray); padding-top: 24px; }
+        .results-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 12px; color: var(--text-deep); }
+        .results-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+        .result-card { display: flex; flex-direction: column; align-items: center; }
+        .result-img { width: 200px; height: 200px; object-fit: cover; border-radius: 20px; border: 1px solid var(--border-gray); cursor: pointer; transition: transform 0.15s; }
+        .result-img:hover { transform: scale(1.02); }
+        .catbox-link { font-size: 0.75rem; color: var(--primary-blue); margin-top: 6px; text-decoration: none; }
+        .catbox-link:hover { text-decoration: underline; }
+        .error-message { margin-top: 20px; padding: 14px 18px; background: #fee2e2; border-radius: 24px; color: #b91c1c; font-weight: 500; border-left: 4px solid #ef4444; }
+        .image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
+        .image-modal.active { display: flex; }
+        .image-modal img { max-width: 90vw; max-height: 90vh; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: var(--transition); }
+        .modal-overlay.active { visibility: visible; opacity: 1; }
+        .modal-card { background: white; max-width: 500px; width: 90%; border-radius: 48px; padding: 28px; }
+        .modal-card h3 { font-size: 1.6rem; font-weight: 600; margin-bottom: 16px; }
+        .modal-params { background: var(--bg-gray-2); border-radius: 28px; padding: 18px; margin: 20px 0; line-height: 1.6; }
+        .button-group { display: flex; gap: 12px; justify-content: flex-end; }
+        .btn-confirm { background: var(--success-green); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { background: var(--border-gray); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
     </style>
 </head>
 <body>
 <div class="card">
-    <!-- 中间所有内容都包裹在这里，自动适配高度，超出可滚动 -->
     <div class="content-wrapper">
         <h2>🎨 AI画图工坊</h2>
         <div class="sub">自然语言绘图 · 智能增强</div>
@@ -531,9 +215,29 @@ HTML_PAGE = """
         </div>
 
         <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
+
+        <!-- 生成结果展示区域 -->
+        {% if image_results %}
+        <div class="results-section">
+            <div class="results-title">🖼️ 生成结果</div>
+            <div class="results-grid">
+            {% for item in image_results %}
+                <div class="result-card">
+                    <img class="result-img" src="{{ item.display_url }}" onclick="openImageModal(this.src)" alt="生成图片">
+                    {% if item.catbox_url %}
+                    <a class="catbox-link" href="{{ item.catbox_url }}" target="_blank">🔗 永久链接</a>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="error-message">{{ error }}</div>
+        {% endif %}
     </div>
 
-    <!-- 底部固定区域，永远在同一个位置，不受内容影响 -->
     <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
     <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
 </div>
@@ -572,7 +276,6 @@ HTML_PAGE = """
         document.getElementById('imageModal').classList.remove('active');
     }
 
-    // DOM 元素
     const aiToggle = document.getElementById('aiOptimizeToggle');
     const aiNoteDiv = document.getElementById('aiNote');
     const paramsPanel = document.getElementById('paramsPanel');
@@ -597,7 +300,6 @@ HTML_PAGE = """
 
     let selectedFiles = [];
 
-    // 图片预览相关
     function updatePreview() {
         previewContainer.innerHTML = '';
         selectedFiles.forEach((file, idx) => {
@@ -639,7 +341,6 @@ HTML_PAGE = """
         syncFileInput();
     });
 
-    // 模式切换（显示/隐藏上传区）
     function toggleUploadArea() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
         if (mode === 'image2image') uploadArea.classList.add('active');
@@ -647,7 +348,6 @@ HTML_PAGE = """
     }
     modeRadios.forEach(r => r.addEventListener('change', toggleUploadArea));
 
-    // AI优化开关
     function updateAIUI() {
         const isEnabled = aiToggle.checked;
         aiNoteDiv.classList.toggle('hidden-vis', !isEnabled);
@@ -655,7 +355,6 @@ HTML_PAGE = """
     }
     aiToggle.addEventListener('change', updateAIUI);
 
-    // 表单数据获取
     function getFormData() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
         const prompt = promptInput.value.trim();
@@ -673,7 +372,6 @@ HTML_PAGE = """
         return formData;
     }
 
-    // AI优化接口调用
     async function callOptimize(prompt, mode) {
         const resp = await fetch('/optimize', {
             method: 'POST',
@@ -685,15 +383,12 @@ HTML_PAGE = """
         return data;
     }
 
-    // 提交生成
     async function submitGenerate(formData) {
         generateBtn.disabled = true;
         generateBtn.textContent = '⏳ 生成中…';
         try {
             const resp = await fetch('/generate', { method: 'POST', body: formData });
-            if (!resp.ok) {
-                throw new Error(`服务器错误：${resp.status}`);
-            }
+            if (!resp.ok) throw new Error(`服务器错误：${resp.status}`);
             const html = await resp.text();
             document.open();
             document.write(html);
@@ -705,7 +400,6 @@ HTML_PAGE = """
         }
     }
 
-    // 确认弹窗
     function showConfirmModal(opt) {
         optPromptSpan.innerText = opt.optimized_prompt;
         optSizeSpan.innerText = opt.size;
@@ -716,7 +410,6 @@ HTML_PAGE = """
         modal.classList.add('active');
     }
 
-    // 生成按钮点击事件
     generateBtn.addEventListener('click', async () => {
         const isAIOpt = aiToggle.checked;
         const rawFormData = getFormData();
@@ -747,7 +440,6 @@ HTML_PAGE = """
         }
     });
 
-    // 弹窗按钮事件
     modalConfirm.addEventListener('click', async () => {
         modal.classList.remove('active');
         if (!window.currentOptimized) return;
@@ -768,7 +460,6 @@ HTML_PAGE = """
     modalCancel.addEventListener('click', () => modal.classList.remove('active'));
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
 
-    // 初始化
     toggleUploadArea();
     updateAIUI();
 </script>
