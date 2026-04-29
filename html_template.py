@@ -65,28 +65,10 @@ HTML_PAGE = """
             padding-bottom: 16px;
             -webkit-overflow-scrolling: touch;
         }
-        .content-wrapper::-webkit-scrollbar {
-            display: none;
-        }
-        .content-wrapper {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-        h2 {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: var(--text-deep);
-            margin-bottom: 4px;
-            flex-shrink: 0;
-        }
-        .sub {
-            font-size: 0.9rem;
-            color: var(--text-light);
-            border-left: 3px solid var(--border-gray);
-            padding-left: 12px;
-            margin-bottom: 24px;
-            flex-shrink: 0;
-        }
+        .content-wrapper::-webkit-scrollbar { display: none; }
+        .content-wrapper { -ms-overflow-style: none; scrollbar-width: none; }
+        h2 { font-size: 1.8rem; font-weight: 700; color: var(--text-deep); margin-bottom: 4px; flex-shrink: 0; }
+        .sub { font-size: 0.9rem; color: var(--text-light); border-left: 3px solid var(--border-gray); padding-left: 12px; margin-bottom: 24px; flex-shrink: 0; }
         .ai-placeholder { min-height: 64px; margin-bottom: 12px; flex-shrink: 0; }
         .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid var(--success-green-deep); transition: opacity 0.2s; }
         .ai-note.hidden-vis { visibility: hidden; opacity: 0; }
@@ -120,6 +102,8 @@ HTML_PAGE = """
         .btn-generate:hover { background: var(--primary-blue-hover); }
         .btn-generate:disabled { background: #94a3b8; cursor: not-allowed; }
         .footnote { font-size: 0.7rem; text-align: center; color: var(--text-minor); margin-top: 16px; flex-shrink: 0; }
+
+        /* 通用结果样式 */
         .results-section { margin-top: 28px; border-top: 1px solid var(--border-gray); padding-top: 24px; }
         .results-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 12px; color: var(--text-deep); }
         .results-grid { display: flex; flex-wrap: wrap; gap: 16px; }
@@ -128,10 +112,17 @@ HTML_PAGE = """
         .result-img:hover { transform: scale(1.02); }
         .catbox-link { font-size: 0.75rem; color: var(--primary-blue); margin-top: 6px; text-decoration: none; }
         .catbox-link:hover { text-decoration: underline; }
+
+        /* 历史记录专属样式 */
+        .history-prompt { font-size: 0.7rem; color: var(--text-gray); max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+        .history-meta { font-size: 0.65rem; color: var(--text-minor); }
+
         .error-message { margin-top: 20px; padding: 14px 18px; background: #fee2e2; border-radius: 24px; color: #b91c1c; font-weight: 500; border-left: 4px solid #ef4444; }
+
         .image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
         .image-modal.active { display: flex; }
         .image-modal img { max-width: 90vw; max-height: 90vh; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: var(--transition); }
         .modal-overlay.active { visibility: visible; opacity: 1; }
         .modal-card { background: white; max-width: 500px; width: 90%; border-radius: 48px; padding: 28px; }
@@ -216,26 +207,11 @@ HTML_PAGE = """
 
         <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
 
-        <!-- 生成结果展示区域 -->
-        {% if image_results %}
-        <div class="results-section">
-            <div class="results-title">🖼️ 生成结果</div>
-            <div class="results-grid">
-            {% for item in image_results %}
-                <div class="result-card">
-                    <img class="result-img" src="{{ item.display_url }}" onclick="openImageModal(this.src)" alt="生成图片">
-                    {% if item.catbox_url %}
-                    <a class="catbox-link" href="{{ item.catbox_url }}" target="_blank">🔗 永久链接</a>
-                    {% endif %}
-                </div>
-            {% endfor %}
-            </div>
-        </div>
-        {% endif %}
+        <!-- 历史记录区域（页面加载后自动显示） -->
+        <div id="historyContainer"></div>
 
-        {% if error %}
-        <div class="error-message">{{ error }}</div>
-        {% endif %}
+        <!-- 本次生成结果区域 -->
+        <div id="resultsContainer"></div>
     </div>
 
     <button id="generateBtn" class="btn-generate">✨ 生成图片</button>
@@ -383,21 +359,75 @@ HTML_PAGE = """
         return data;
     }
 
+    // 渲染当前生成结果
+    function renderResults(results) {
+        const container = document.getElementById('resultsContainer');
+        let html = '';
+        if (results && results.length > 0) {
+            html += '<div class="results-section">';
+            html += '<div class="results-title">🖼️ 生成结果</div>';
+            html += '<div class="results-grid">';
+            results.forEach(item => {
+                html += '<div class="result-card">';
+                html += `<img class="result-img" src="${item.display_url}" onclick="openImageModal(this.src)" alt="生成图片">`;
+                if (item.catbox_url) {
+                    html += `<a class="catbox-link" href="${item.catbox_url}" target="_blank">🔗 永久链接</a>`;
+                }
+                html += '</div>';
+            });
+            html += '</div></div>';
+        }
+        container.innerHTML = html;
+    }
+
     async function submitGenerate(formData) {
         generateBtn.disabled = true;
         generateBtn.textContent = '⏳ 生成中…';
         try {
             const resp = await fetch('/generate', { method: 'POST', body: formData });
-            if (!resp.ok) throw new Error(`服务器错误：${resp.status}`);
-            const html = await resp.text();
-            document.open();
-            document.write(html);
-            document.close();
+            const data = await resp.json();
+            if (!data.success) {
+                throw new Error(data.error || '生成失败');
+            }
+            renderResults(data.results);
+            // 生成成功后刷新历史记录
+            loadHistory();
         } catch (err) {
+            const container = document.getElementById('resultsContainer');
+            container.innerHTML = `<div class="error-message">${err.message}</div>`;
+        } finally {
             generateBtn.disabled = false;
             generateBtn.textContent = '✨ 生成图片';
-            alert('生成失败: ' + err.message);
         }
+    }
+
+    // 历史记录相关
+    async function loadHistory() {
+        try {
+            const resp = await fetch('/api/history');
+            const history = await resp.json();
+            renderHistory(history);
+        } catch (e) {
+            console.error('加载历史失败', e);
+        }
+    }
+
+    function renderHistory(history) {
+        const container = document.getElementById('historyContainer');
+        if (!history || history.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+        let html = '<div class="results-section"><div class="results-title">📚 历史记录</div><div class="results-grid">';
+        history.forEach(item => {
+            html += '<div class="result-card">';
+            html += `<img class="result-img" src="${item.catbox_url}" onclick="openImageModal(this.src)" alt="${item.prompt}">`;
+            html += `<div class="history-prompt" title="${item.prompt}">${item.prompt.substring(0, 20)}...</div>`;
+            html += `<div class="history-meta">${item.size}x${item.size} | ${item.style}</div>`;
+            html += '</div>';
+        });
+        html += '</div></div>';
+        container.innerHTML = html;
     }
 
     function showConfirmModal(opt) {
@@ -460,8 +490,11 @@ HTML_PAGE = """
     modalCancel.addEventListener('click', () => modal.classList.remove('active'));
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
 
+    // 初始化
     toggleUploadArea();
     updateAIUI();
+    // 页面加载时显示历史记录
+    loadHistory();
 </script>
 </body>
 </html>

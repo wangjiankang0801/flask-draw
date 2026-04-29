@@ -1,9 +1,11 @@
 import os
+import time                         # 新增
 from flask import Flask, request, render_template_string, jsonify
 from html_template import HTML_PAGE
 from config import ENABLE_LLM_OPT
 from image2 import generate_images
 from deepseek import call_llm_for_optimization
+from history_manager import save_history_entry   # 新增
 
 app = Flask(__name__)
 
@@ -13,7 +15,6 @@ def index():
 
 @app.route("/optimize", methods=["POST"])
 def optimize():
-    """接收原始提示词，返回大模型优化后的参数"""
     if not ENABLE_LLM_OPT:
         return jsonify({"success": False, "error": "大模型未配置"}), 400
     data = request.get_json()
@@ -36,7 +37,6 @@ def optimize():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    """接收表单参数，调用绘图API并返回结果页面"""
     mode = request.form.get("mode")
     prompt = request.form.get("prompt")
     size = request.form.get("size")
@@ -46,12 +46,34 @@ def generate():
     image_files = request.files.getlist("image_files") if mode == "image2image" else []
 
     if not prompt:
-        return render_template_string(HTML_PAGE, error="提示词不能为空")
+        return jsonify({"success": False, "error": "提示词不能为空"}), 400
     try:
         results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
-        return render_template_string(HTML_PAGE, image_results=results)
+        # ----- 保存历史记录（只存有永久链接的）-----
+        for item in results:
+            catbox_url = item.get("catbox_url")
+            if catbox_url:
+                entry = {
+                    "timestamp": time.time(),
+                    "prompt": prompt,
+                    "mode": mode,
+                    "style": style,
+                    "size": size,
+                    "catbox_url": catbox_url
+                }
+                save_history_entry(entry)
+        # -------------------------------------
+        return jsonify({"success": True, "results": results})
     except Exception as e:
-        return render_template_string(HTML_PAGE, error=f"生成失败: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    from history_manager import load_history
+    history = load_history()
+    # 返回最新的在前
+    history.reverse()
+    return jsonify(history)
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))

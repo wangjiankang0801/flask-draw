@@ -21,3 +21,6 @@ DEFAULT_NEGATIVE_PROMPT = (
     "mutated hands, extra fingers, missing fingers, bad proportions, "
     "text, watermark, signature, logo"
 )
+
+# 历史记录存储文件
+HISTORY_FILE = os.path.join(os.path.dirname(__file__), "history.json")
