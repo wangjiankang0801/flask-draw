@@ -412,13 +412,13 @@ HTML_PAGE = """
         }
     }
 
-    function renderHistory(history) {
-        const container = document.getElementById('historyContainer');
-        if (!history || history.length === 0) {
-            container.innerHTML = '';
-            return;
-        }
-        let html = '<div class="results-section"><div class="results-title">📚 历史记录</div><div class="results-grid">';
+function renderHistory(history) {
+    const container = document.getElementById('historyContainer');
+    let html = '<div class="results-section"><div class="results-title">📚 历史记录</div>';
+    if (!history || history.length === 0) {
+        html += '<p style="color: var(--text-minor); font-size: 0.85rem; margin-top: 8px;">暂无历史记录,生成图片后会自动出现在这里。</p>';
+    } else {
+        html += '<div class="results-grid">';
         history.forEach(item => {
             html += '<div class="result-card">';
             html += `<img class="result-img" src="${item.catbox_url}" onclick="openImageModal(this.src)" alt="${item.prompt}">`;
@@ -426,9 +426,11 @@ HTML_PAGE = """
             html += `<div class="history-meta">${item.size}x${item.size} | ${item.style}</div>`;
             html += '</div>';
         });
-        html += '</div></div>';
-        container.innerHTML = html;
+        html += '</div>';
     }
+    html += '</div>';
+    container.innerHTML = html;
+}
 
     function showConfirmModal(opt) {
         optPromptSpan.innerText = opt.optimized_prompt;
