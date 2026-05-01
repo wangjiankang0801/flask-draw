@@ -9,10 +9,10 @@ TEXT2IMAGE_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/text-to
 IMAGE_EDIT_URL = "https://api.gptsapi.net/api/v3/openai/gpt-image-2-plus/image-edit"
 CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 
-# 大模型优化配置
-LLM_API_KEY = os.environ.get("LLM_API_KEY")
-LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://qianfan.baidubce.com/v2/chat/completions")
-LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-v3.1-250821")
+# 大模型优化配置（小米 MiMo）
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "tp-ccj2jrtpos4aqms0bl50xtj89fqjoiolesh658dahs64zk3g")
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "https://token-plan-cn.xiaomimimo.com/v1/chat/completions")
+LLM_MODEL = os.environ.get("LLM_MODEL", "mimo-v2.5-pro")
 ENABLE_LLM_OPT = bool(LLM_API_KEY)
 
 # 默认负面提示词

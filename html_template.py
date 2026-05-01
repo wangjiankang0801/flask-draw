@@ -1,5 +1,5 @@
 # html_template.py
-# 仅包含前端页面模板字符串，无其他依赖
+# 优化后的前端页面模板，支持文生图/图生图、AI优化、历史记录
 
 HTML_PAGE = """
 <!DOCTYPE html>
@@ -10,127 +10,108 @@ HTML_PAGE = """
     <title>AI画图工坊 · 智能优化</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body {
-            width: 100%;
-            height: 100%;
-            min-height: 100dvh;
-            overflow: hidden;
-        }
+        html, body { width: 100%; height: 100%; min-height: 100dvh; overflow: hidden; }
         :root {
-            --primary-blue: #3b82f6;
-            --primary-blue-hover: #2563eb;
-            --success-green: #86efac;
-            --success-green-deep: #22c55e;
-            --bg-light: #f5f7fb;
-            --bg-card: #ffffff;
-            --bg-gray-1: #f8fafc;
-            --bg-gray-2: #f1f5f9;
-            --border-gray: #cbd5e1;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #22c55e;
+            --success-light: #86efac;
+            --bg: #f5f7fb;
+            --card: #ffffff;
+            --gray-1: #f8fafc;
+            --gray-2: #f1f5f9;
+            --border: #cbd5e1;
             --text-deep: #0f172a;
             --text-gray: #475569;
             --text-light: #5b6e8c;
             --text-minor: #94a3b8;
+            --shadow: 0 12px 30px rgba(0,0,0,0.08);
             --transition: 0.2s ease;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: var(--bg-light);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
+            background: var(--bg);
+            display: flex; align-items: center; justify-content: center;
             padding: 20px 20px max(20px, env(safe-area-inset-bottom)) 20px;
-            margin: 0;
         }
         .card {
-            max-width: 760px;
-            width: 100%;
-            background: var(--bg-card);
-            border-radius: 40px;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.08);
+            max-width: 760px; width: 100%;
+            background: var(--card); border-radius: 40px; box-shadow: var(--shadow);
             padding: 28px 32px 24px;
-            display: flex;
-            flex-direction: column;
-            height: calc(100dvh - 40px);
-            max-height: calc(100dvh - 40px);
-            min-height: 0;
-            flex-shrink: 0;
+            display: flex; flex-direction: column;
+            height: calc(100dvh - 40px); max-height: calc(100dvh - 40px);
+            min-height: 0; flex-shrink: 0;
         }
         .content-wrapper {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-            overflow-x: hidden;
-            padding-bottom: 16px;
+            flex: 1; display: flex; flex-direction: column;
+            overflow-y: auto; overflow-x: hidden; padding-bottom: 16px;
             -webkit-overflow-scrolling: touch;
         }
         .content-wrapper::-webkit-scrollbar { display: none; }
         .content-wrapper { -ms-overflow-style: none; scrollbar-width: none; }
         h2 { font-size: 1.8rem; font-weight: 700; color: var(--text-deep); margin-bottom: 4px; flex-shrink: 0; }
-        .sub { font-size: 0.9rem; color: var(--text-light); border-left: 3px solid var(--border-gray); padding-left: 12px; margin-bottom: 24px; flex-shrink: 0; }
+        .sub { font-size: 0.9rem; color: var(--text-light); border-left: 3px solid var(--border); padding-left: 12px; margin-bottom: 24px; flex-shrink: 0; }
         .ai-placeholder { min-height: 64px; margin-bottom: 12px; flex-shrink: 0; }
-        .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid var(--success-green-deep); transition: opacity 0.2s; }
+        .ai-note { background: #e6f7ec; padding: 12px 18px; border-radius: 24px; font-size: 0.85rem; color: #166534; border-left: 4px solid var(--success); transition: opacity 0.2s; }
         .ai-note.hidden-vis { visibility: hidden; opacity: 0; }
-        .toggle-row { display: flex; align-items: center; justify-content: space-between; background: var(--bg-gray-2); padding: 12px 20px; border-radius: 60px; margin-bottom: 28px; flex-shrink: 0; }
+        .toggle-row { display: flex; align-items: center; justify-content: space-between; background: var(--gray-2); padding: 12px 20px; border-radius: 60px; margin-bottom: 28px; flex-shrink: 0; }
         .toggle-label { font-weight: 600; font-size: 1rem; color: var(--text-deep); }
         .toggle-switch { position: relative; display: inline-block; width: 52px; height: 28px; flex-shrink: 0; }
         .toggle-switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--border-gray); transition: var(--transition); border-radius: 28px; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--border); transition: var(--transition); border-radius: 28px; }
         .slider:before { position: absolute; content: ""; height: 24px; width: 24px; left: 2px; bottom: 2px; background: white; transition: var(--transition); border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
-        input:checked + .slider { background: var(--success-green); }
+        input:checked + .slider { background: var(--success-light); }
         input:checked + .slider:before { transform: translateX(24px); }
-        .mode-buttons { display: flex; gap: 24px; margin-bottom: 24px; background: var(--bg-gray-1); padding: 10px 20px; border-radius: 60px; width: 100%; justify-content: center; flex-wrap: wrap; flex-shrink: 0; }
+        .mode-buttons { display: flex; gap: 24px; margin-bottom: 24px; background: var(--gray-1); padding: 10px 20px; border-radius: 60px; width: 100%; justify-content: center; flex-wrap: wrap; flex-shrink: 0; }
         .mode-buttons label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; white-space: nowrap; font-size: 1rem; }
         .mode-buttons input { margin: 0; transform: scale(1.1); }
-        .params-panel { background: var(--bg-gray-1); border-radius: 32px; padding: 18px 24px; margin-bottom: 24px; transition: visibility 0.2s, opacity 0.2s; flex-shrink: 0; }
+        .params-panel { background: var(--gray-1); border-radius: 32px; padding: 18px 24px; margin-bottom: 24px; transition: visibility 0.2s, opacity 0.2s; flex-shrink: 0; }
         .params-panel.param-hidden { visibility: hidden; opacity: 0; height: 0; padding: 0; margin: 0; overflow: hidden; }
         .param-row { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 16px; }
         .param-row:last-child { margin-bottom: 0; }
         .param-group { flex: 1; min-width: 120px; }
         .param-group label { display: block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; color: var(--text-gray); margin-bottom: 5px; }
-        select { width: 100%; padding: 8px 12px; border-radius: 28px; border: 1px solid var(--border-gray); background: white; font-size: 0.9rem; outline: none; }
+        select { width: 100%; padding: 8px 12px; border-radius: 28px; border: 1px solid var(--border); background: white; font-size: 0.9rem; outline: none; }
         .upload-section { background: #fef9e3; border-radius: 28px; padding: 16px 20px; margin-bottom: 18px; display: none; flex-shrink: 0; }
         .upload-section.active { display: block; }
         .preview-container { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
         .preview-wrapper { position: relative; }
         .preview-img { width: 80px; height: 80px; object-fit: cover; border-radius: 16px; border: 1px solid #ddd; }
         .preview-del-btn { position: absolute; top: 2px; right: 2px; width: 20px; height: 20px; background: rgba(0,0,0,0.5); color: white; border: none; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 1; }
-        textarea { width: 100%; padding: 12px 16px; border-radius: 28px; border: 1px solid var(--border-gray); font-size: 0.95rem; resize: none; margin-bottom: 0; font-family: inherit; outline: none; transition: height 0.1s ease; flex-shrink: 0; }
-        textarea:focus { border-color: var(--primary-blue); }
-        .btn-generate { width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600; border: none; border-radius: 44px; background: var(--primary-blue); color: white; cursor: pointer; margin-top: 18px; transition: var(--transition); flex-shrink: 0; }
-        .btn-generate:hover { background: var(--primary-blue-hover); }
+        textarea { width: 100%; padding: 12px 16px; border-radius: 28px; border: 1px solid var(--border); font-size: 0.95rem; resize: none; font-family: inherit; outline: none; transition: height 0.1s ease; flex-shrink: 0; }
+        textarea:focus { border-color: var(--primary); }
+        .btn-generate { width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600; border: none; border-radius: 44px; background: var(--primary); color: white; cursor: pointer; margin-top: 18px; transition: var(--transition); flex-shrink: 0; }
+        .btn-generate:hover { background: var(--primary-hover); }
         .btn-generate:disabled { background: #94a3b8; cursor: not-allowed; }
         .footnote { font-size: 0.7rem; text-align: center; color: var(--text-minor); margin-top: 16px; flex-shrink: 0; }
-
-        /* 通用结果样式 */
-        .results-section { margin-top: 28px; border-top: 1px solid var(--border-gray); padding-top: 24px; }
+        .results-section { margin-top: 28px; border-top: 1px solid var(--border); padding-top: 24px; }
         .results-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 12px; color: var(--text-deep); }
         .results-grid { display: flex; flex-wrap: wrap; gap: 16px; }
         .result-card { display: flex; flex-direction: column; align-items: center; }
-        .result-img { width: 200px; height: 200px; object-fit: cover; border-radius: 20px; border: 1px solid var(--border-gray); cursor: pointer; transition: transform 0.15s; }
+        .result-img { width: 200px; height: 200px; object-fit: cover; border-radius: 20px; border: 1px solid var(--border); cursor: pointer; transition: transform 0.15s; }
         .result-img:hover { transform: scale(1.02); }
-        .catbox-link { font-size: 0.75rem; color: var(--primary-blue); margin-top: 6px; text-decoration: none; }
+        .catbox-link { font-size: 0.75rem; color: var(--primary); margin-top: 6px; text-decoration: none; }
         .catbox-link:hover { text-decoration: underline; }
-
-        /* 历史记录专属样式 */
         .history-prompt { font-size: 0.7rem; color: var(--text-gray); max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
         .history-meta { font-size: 0.65rem; color: var(--text-minor); }
-
         .error-message { margin-top: 20px; padding: 14px 18px; background: #fee2e2; border-radius: 24px; color: #b91c1c; font-weight: 500; border-left: 4px solid #ef4444; }
-
         .image-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; }
         .image-modal.active { display: flex; }
         .image-modal img { max-width: 90vw; max-height: 90vh; border-radius: 20px; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
-
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; visibility: hidden; opacity: 0; transition: var(--transition); }
         .modal-overlay.active { visibility: visible; opacity: 1; }
         .modal-card { background: white; max-width: 500px; width: 90%; border-radius: 48px; padding: 28px; }
         .modal-card h3 { font-size: 1.6rem; font-weight: 600; margin-bottom: 16px; }
-        .modal-params { background: var(--bg-gray-2); border-radius: 28px; padding: 18px; margin: 20px 0; line-height: 1.6; }
+        .modal-params { background: var(--gray-2); border-radius: 28px; padding: 18px; margin: 20px 0; line-height: 1.6; }
         .button-group { display: flex; gap: 12px; justify-content: flex-end; }
-        .btn-confirm { background: var(--success-green); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
-        .btn-cancel { background: var(--border-gray); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        .btn-confirm { background: var(--success-light); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        .btn-cancel { background: var(--border); border: none; padding: 8px 24px; border-radius: 40px; font-weight: 600; cursor: pointer; }
+        @media (max-width: 600px) {
+            .card { padding: 20px; border-radius: 30px; }
+            h2 { font-size: 1.5rem; }
+            .result-img { width: 150px; height: 150px; }
+            .mode-buttons { gap: 12px; }
+        }
     </style>
 </head>
 <body>
@@ -141,12 +122,12 @@ HTML_PAGE = """
 
         <div class="ai-placeholder">
             <div id="aiNote" class="ai-note hidden-vis">
-                ✨ 已启用 DeepSeek-V3 智能优化：您的描述会被自动转换为高质量绘画参数（风格/尺寸/步数等将自动适配）。
+                ✨ 已启用 AI 智能优化：您的描述会被自动转换为高质量绘画参数。
             </div>
         </div>
 
         <div class="toggle-row">
-            <span class="toggle-label">✨ 启用 DeepSeek-V3 优化</span>
+            <span class="toggle-label">✨ 启用 AI 优化</span>
             <label class="toggle-switch">
                 <input type="checkbox" id="aiOptimizeToggle">
                 <span class="slider"></span>
@@ -171,8 +152,8 @@ HTML_PAGE = """
                 <div class="param-group">
                     <label>🎨 风格</label>
                     <select id="styleSelect">
-                        <option value="realistic">写实 (Realistic)</option>
-                        <option value="anime">二次元 (Anime)</option>
+                        <option value="realistic">写实</option>
+                        <option value="anime">二次元</option>
                         <option value="digital-painting">数字绘画</option>
                         <option value="oil-painting">油画</option>
                         <option value="pixel-art">像素风</option>
@@ -205,12 +186,9 @@ HTML_PAGE = """
             <div id="previewContainer" class="preview-container"></div>
         </div>
 
-        <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格，电影光效"></textarea>
+        <textarea id="promptInput" rows="4" placeholder="描述你想画的内容，例如：一只穿着宇航服的柴犬，在火星上，赛博朋克风格"></textarea>
 
-        <!-- 历史记录区域（页面加载后自动显示） -->
         <div id="historyContainer"></div>
-
-        <!-- 本次生成结果区域 -->
         <div id="resultsContainer"></div>
     </div>
 
@@ -218,12 +196,10 @@ HTML_PAGE = """
     <div class="footnote">* 开启AI优化后，点击生成会展示优化后的参数确认框</div>
 </div>
 
-<!-- 图片放大模态框 -->
 <div id="imageModal" class="image-modal" onclick="closeImageModal()">
     <img id="imageModalImg" src="" alt="放大图片">
 </div>
 
-<!-- 确认生成弹窗 -->
 <div id="confirmModal" class="modal-overlay">
     <div class="modal-card">
         <h3>📝 是否生成以下内容？</h3>
@@ -243,7 +219,6 @@ HTML_PAGE = """
 </div>
 
 <script>
-    // 图片放大模态框
     function openImageModal(src) {
         document.getElementById('imageModalImg').src = src;
         document.getElementById('imageModal').classList.add('active');
@@ -263,11 +238,6 @@ HTML_PAGE = """
     const modal = document.getElementById('confirmModal');
     const modalCancel = document.getElementById('modalCancelBtn');
     const modalConfirm = document.getElementById('modalConfirmBtn');
-    const optPromptSpan = document.getElementById('optPromptText');
-    const optSizeSpan = document.getElementById('optSize');
-    const optStyleSpan = document.getElementById('optStyle');
-    const optNumSpan = document.getElementById('optNum');
-    const optStepsSpan = document.getElementById('optSteps');
     const promptInput = document.getElementById('promptInput');
     const sizeSelect = document.getElementById('sizeSelect');
     const styleSelect = document.getElementById('styleSelect');
@@ -287,11 +257,7 @@ HTML_PAGE = """
                 const delBtn = document.createElement('button');
                 delBtn.innerText = '✕';
                 delBtn.className = 'preview-del-btn';
-                delBtn.onclick = () => {
-                    selectedFiles.splice(idx, 1);
-                    updatePreview();
-                    syncFileInput();
-                };
+                delBtn.onclick = () => { selectedFiles.splice(idx, 1); updatePreview(); syncFileInput(); };
                 const wrapper = document.createElement('div');
                 wrapper.className = 'preview-wrapper';
                 wrapper.appendChild(img);
@@ -307,20 +273,15 @@ HTML_PAGE = """
         imageInput.files = dt.files;
     }
     imageInput.addEventListener('change', (e) => {
-        const newFiles = Array.from(e.target.files);
-        newFiles.forEach(file => {
-            if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
-                selectedFiles.push(file);
-            }
+        Array.from(e.target.files).forEach(file => {
+            if (!selectedFiles.some(f => f.name === file.name && f.size === file.size)) selectedFiles.push(file);
         });
-        updatePreview();
-        syncFileInput();
+        updatePreview(); syncFileInput();
     });
 
     function toggleUploadArea() {
         const mode = document.querySelector('input[name="mode"]:checked').value;
-        if (mode === 'image2image') uploadArea.classList.add('active');
-        else uploadArea.classList.remove('active');
+        uploadArea.classList.toggle('active', mode === 'image2image');
     }
     modeRadios.forEach(r => r.addEventListener('change', toggleUploadArea));
 
@@ -342,37 +303,26 @@ HTML_PAGE = """
         formData.append('style', styleSelect.value);
         formData.append('num', numSelect.value);
         formData.append('steps', stepsSelect.value);
-        for (let file of selectedFiles) {
-            formData.append('image_files', file);
-        }
+        for (let file of selectedFiles) formData.append('image_files', file);
         return formData;
     }
 
     async function callOptimize(prompt, mode) {
-        const resp = await fetch('/optimize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, mode })
-        });
+        const resp = await fetch('/optimize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, mode }) });
         const data = await resp.json();
         if (!data.success) throw new Error(data.error);
         return data;
     }
 
-    // 渲染当前生成结果
     function renderResults(results) {
         const container = document.getElementById('resultsContainer');
         let html = '';
         if (results && results.length > 0) {
-            html += '<div class="results-section">';
-            html += '<div class="results-title">🖼️ 生成结果</div>';
-            html += '<div class="results-grid">';
+            html += '<div class="results-section"><div class="results-title">🖼️ 生成结果</div><div class="results-grid">';
             results.forEach(item => {
                 html += '<div class="result-card">';
-                html += `<img class="result-img" src="${item.display_url}" onclick="openImageModal(this.src)" alt="生成图片">`;
-                if (item.catbox_url) {
-                    html += `<a class="catbox-link" href="${item.catbox_url}" target="_blank">🔗 永久链接</a>`;
-                }
+                html += '<img class="result-img" src="' + item.display_url + '" onclick="openImageModal(this.src)" alt="生成图片">';
+                if (item.catbox_url) html += '<a class="catbox-link" href="' + item.catbox_url + '" target="_blank">🔗 永久链接</a>';
                 html += '</div>';
             });
             html += '</div></div>';
@@ -386,89 +336,66 @@ HTML_PAGE = """
         try {
             const resp = await fetch('/generate', { method: 'POST', body: formData });
             const data = await resp.json();
-            if (!data.success) {
-                throw new Error(data.error || '生成失败');
-            }
+            if (!data.success) throw new Error(data.error || '生成失败');
             renderResults(data.results);
-            // 生成成功后刷新历史记录
             loadHistory();
         } catch (err) {
-            const container = document.getElementById('resultsContainer');
-            container.innerHTML = `<div class="error-message">${err.message}</div>`;
+            document.getElementById('resultsContainer').innerHTML = '<div class="error-message">' + err.message + '</div>';
         } finally {
             generateBtn.disabled = false;
             generateBtn.textContent = '✨ 生成图片';
         }
     }
 
-    // 历史记录相关
     async function loadHistory() {
         try {
             const resp = await fetch('/api/history');
             const history = await resp.json();
             renderHistory(history);
-        } catch (e) {
-            console.error('加载历史失败', e);
-        }
+        } catch (e) { console.error('加载历史失败', e); }
     }
 
-function renderHistory(history) {
-    const container = document.getElementById('historyContainer');
-    let html = '<div class="results-section"><div class="results-title">📚 历史记录</div>';
-    if (!history || history.length === 0) {
-        html += '<p style="color: var(--text-minor); font-size: 0.85rem; margin-top: 8px;">暂无历史记录,生成图片后会自动出现在这里。</p>';
-    } else {
-        html += '<div class="results-grid">';
-        history.forEach(item => {
-            html += '<div class="result-card">';
-            html += `<img class="result-img" src="${item.catbox_url}" onclick="openImageModal(this.src)" alt="${item.prompt}">`;
-            html += `<div class="history-prompt" title="${item.prompt}">${item.prompt.substring(0, 20)}...</div>`;
-            html += `<div class="history-meta">${item.size}x${item.size} | ${item.style}</div>`;
+    function renderHistory(history) {
+        const container = document.getElementById('historyContainer');
+        let html = '<div class="results-section"><div class="results-title">📚 历史记录</div>';
+        if (!history || history.length === 0) {
+            html += '<p style="color: var(--text-minor); font-size: 0.85rem; margin-top: 8px;">暂无历史记录</p>';
+        } else {
+            html += '<div class="results-grid">';
+            history.forEach(item => {
+                html += '<div class="result-card">';
+                html += '<img class="result-img" src="' + item.catbox_url + '" onclick="openImageModal(this.src)" alt="' + item.prompt + '">';
+                html += '<div class="history-prompt" title="' + item.prompt + '">' + item.prompt.substring(0, 20) + '...</div>';
+                html += '<div class="history-meta">' + item.size + 'x' + item.size + ' | ' + item.style + '</div>';
+                html += '</div>';
+            });
             html += '</div>';
-        });
+        }
         html += '</div>';
+        container.innerHTML = html;
     }
-    html += '</div>';
-    container.innerHTML = html;
-}
 
     function showConfirmModal(opt) {
-        optPromptSpan.innerText = opt.optimized_prompt;
-        optSizeSpan.innerText = opt.size;
+        document.getElementById('optPromptText').innerText = opt.optimized_prompt;
+        document.getElementById('optSize').innerText = opt.size;
         const styleMap = { 'realistic':'写实', 'anime':'二次元', 'digital-painting':'数字绘画', 'oil-painting':'油画', 'pixel-art':'像素风' };
-        optStyleSpan.innerText = styleMap[opt.style] || opt.style;
-        optNumSpan.innerText = opt.num;
-        optStepsSpan.innerText = opt.steps;
+        document.getElementById('optStyle').innerText = styleMap[opt.style] || opt.style;
+        document.getElementById('optNum').innerText = opt.num;
+        document.getElementById('optSteps').innerText = opt.steps;
         modal.classList.add('active');
     }
 
     generateBtn.addEventListener('click', async () => {
-        const isAIOpt = aiToggle.checked;
         const rawFormData = getFormData();
-        if (!rawFormData) {
-            alert("请输入提示词");
-            return;
-        }
-        if (!isAIOpt) {
+        if (!rawFormData) { alert("请输入提示词"); return; }
+        if (!aiToggle.checked) {
             await submitGenerate(rawFormData);
         } else {
-            const mode = rawFormData.get('mode');
-            const prompt = rawFormData.get('prompt');
             try {
-                const optResult = await callOptimize(prompt, mode);
-                window.currentOptimized = {
-                    mode,
-                    optimized_prompt: optResult.optimized_prompt,
-                    size: optResult.size,
-                    style: optResult.style,
-                    num: optResult.num,
-                    steps: optResult.steps,
-                    image_files: selectedFiles.slice()
-                };
+                const optResult = await callOptimize(rawFormData.get('prompt'), rawFormData.get('mode'));
+                window.currentOptimized = { mode: rawFormData.get('mode'), ...optResult, image_files: selectedFiles.slice() };
                 showConfirmModal(window.currentOptimized);
-            } catch (err) {
-                alert("优化失败：" + err.message);
-            }
+            } catch (err) { alert("优化失败：" + err.message); }
         }
     });
 
@@ -483,19 +410,15 @@ function renderHistory(history) {
         formData.append('style', opt.style);
         formData.append('num', opt.num);
         formData.append('steps', opt.steps);
-        for (let file of opt.image_files) {
-            formData.append('image_files', file);
-        }
+        for (let file of opt.image_files) formData.append('image_files', file);
         await submitGenerate(formData);
         window.currentOptimized = null;
     });
     modalCancel.addEventListener('click', () => modal.classList.remove('active'));
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('active'); });
 
-    // 初始化
     toggleUploadArea();
     updateAIUI();
-    // 页面加载时显示历史记录
     loadHistory();
 </script>
 </body>

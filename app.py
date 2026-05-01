@@ -1,11 +1,11 @@
 import os
-import time                         # 新增
+import time
 from flask import Flask, request, render_template_string, jsonify
 from html_template import HTML_PAGE
 from config import ENABLE_LLM_OPT
 from image2 import generate_images
 from deepseek import call_llm_for_optimization
-from history_manager import save_history_entry   # 新增
+from history_manager import save_history_entry
 
 app = Flask(__name__)
 
@@ -49,7 +49,6 @@ def generate():
         return jsonify({"success": False, "error": "提示词不能为空"}), 400
     try:
         results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
-        # ----- 保存历史记录（只存有永久链接的）-----
         for item in results:
             catbox_url = item.get("catbox_url")
             if catbox_url:
@@ -62,7 +61,6 @@ def generate():
                     "catbox_url": catbox_url
                 }
                 save_history_entry(entry)
-        # -------------------------------------
         return jsonify({"success": True, "results": results})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -71,7 +69,6 @@ def generate():
 def api_history():
     from history_manager import load_history
     history = load_history()
-    # 返回最新的在前
     history.reverse()
     return jsonify(history)
 

@@ -67,14 +67,12 @@ def process_generated_output(raw_output):
     处理 API 返回的原始输出，统一转成安全的 PNG base64 和显示用 URL，
     并上传到 catbox 获取永久链接。
     """
-    # 1. 原始输出可能为空
     if not raw_output:
         print("[WARN] process_generated_output: raw_output 为空")
         return {"display_url": "", "catbox_url": None}
 
     print(f"[DEBUG] raw_output 前 80 字符: {str(raw_output)[:80]}")
 
-    # 2. 先尝试获取图片二进制数据
     img_bytes = None
     if raw_output.startswith('data:image/png;base64,'):
         b64_data = raw_output[len('data:image/png;base64,'):]
@@ -96,18 +94,15 @@ def process_generated_output(raw_output):
         except Exception as e:
             print(f"[ERROR] 下载图片失败: {e}")
     else:
-        # 纯 base64 字符串，尝试解码
         try:
             img_bytes = base64.b64decode(raw_output)
         except Exception as e:
             print(f"[ERROR] base64 解码失败 (纯 base64): {e}")
 
-    # 3. 如果没有拿到二进制数据，返回空
     if not img_bytes:
         print("[WARN] 未能获取到图片二进制数据，display_url 为空")
         return {"display_url": "", "catbox_url": None}
 
-    # 4. 统一用 PIL 转成 PNG，再生成 data: URL
     display_url = ""
     try:
         from PIL import Image
@@ -116,14 +111,11 @@ def process_generated_output(raw_output):
         buf = BytesIO()
         img.save(buf, format='PNG')
         final_bytes = buf.getvalue()
-        # 重新编码为 base64
         b64_final = base64.b64encode(final_bytes).decode()
         display_url = "data:image/png;base64," + b64_final
         print("[DEBUG] 已用 PIL 统一转换为 PNG base64")
     except ImportError:
-        # 没有 PIL，只能根据原始数据猜测格式
         print("[WARN] PIL 未安装，使用原始格式")
-        # 简单判断 JPEG 魔术字
         if img_bytes[:3] == b'\xff\xd8\xff':
             b64_data = base64.b64encode(img_bytes).decode()
             display_url = "data:image/jpeg;base64," + b64_data
@@ -132,11 +124,9 @@ def process_generated_output(raw_output):
             display_url = "data:image/png;base64," + b64_data
     except Exception as e:
         print(f"[ERROR] PIL 处理失败: {e}")
-        # 最后兜底：直接用原始字节生成 png 链接
         b64_data = base64.b64encode(img_bytes).decode()
         display_url = "data:image/png;base64," + b64_data
 
-    # 5. 上传 catbox
     catbox_url = upload_bytes_to_catbox(img_bytes, f"generated_{int(time.time())}.png")
     if catbox_url:
         print(f"[DEBUG] catbox 上传成功: {catbox_url}")
