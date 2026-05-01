@@ -1,13 +1,18 @@
 import os
 import time
-from flask import Flask, request, render_template_string, jsonify
+from flask import Flask, request, render_template_string, jsonify, send_from_directory
 from html_template import HTML_PAGE
 from config import ENABLE_LLM_OPT
-from image2 import generate_images
+from image2 import generate_images, TEMP_DIR
 from deepseek import call_llm_for_optimization
 from history_manager import save_history_entry
 
 app = Flask(__name__)
+
+@app.route("/temp/<filename>")
+def serve_temp_image(filename):
+    """托管临时上传的图片，供图片生成API访问"""
+    return send_from_directory(TEMP_DIR, filename)
 
 @app.route("/", methods=["GET"])
 def index():
@@ -28,7 +33,7 @@ def optimize():
             "success": True,
             "optimized_prompt": opt["optimized_prompt"],
             "style": opt["style"],
-            "size": str(opt["size"]),
+            "aspect_ratio": opt["aspect_ratio"],
             "steps": opt["steps"],
             "num": opt["num"]
         })
@@ -39,7 +44,7 @@ def optimize():
 def generate():
     mode = request.form.get("mode")
     prompt = request.form.get("prompt")
-    size = request.form.get("size")
+    aspect_ratio = request.form.get("aspect_ratio", "1:1")
     style = request.form.get("style")
     num = int(request.form.get("num", 1))
     steps = int(request.form.get("steps", 50))
@@ -48,7 +53,8 @@ def generate():
     if not prompt:
         return jsonify({"success": False, "error": "提示词不能为空"}), 400
     try:
-        results = generate_images(mode, prompt, int(size), num, style, steps, image_files)
+        host_url = request.host_url.rstrip("/")
+        results = generate_images(mode, prompt, aspect_ratio, num, style, steps, image_files, host_url)
         for item in results:
             catbox_url = item.get("catbox_url")
             if catbox_url:
@@ -57,7 +63,7 @@ def generate():
                     "prompt": prompt,
                     "mode": mode,
                     "style": style,
-                    "size": size,
+                    "aspect_ratio": aspect_ratio,
                     "catbox_url": catbox_url
                 }
                 save_history_entry(entry)
@@ -71,6 +77,17 @@ def api_history():
     history = load_history()
     history.reverse()
     return jsonify(history)
+
+@app.route("/api/history/delete", methods=["POST"])
+def api_delete_history():
+    """删除历史记录（支持批量删除）"""
+    data = request.get_json()
+    indices = data.get("indices", [])
+    if not indices:
+        return jsonify({"success": False, "error": "未选择要删除的记录"}), 400
+    from history_manager import delete_history_entries
+    delete_history_entries(indices)
+    return jsonify({"success": True})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
